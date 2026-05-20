@@ -98,12 +98,23 @@ public final class LlamaContext implements AutoCloseable {
     /** 同步生成文本，返回完整结果 */
     private static native String generate(long nativeHandle, String prompt,
         int maxTokens, float temperature, int topK, float topP,
-        float repeatPenalty, long seed);
+        float repeatPenalty, long seed, String stopToken);
 
     /** 流式生成文本，每个 token 通过回调传递 */
     private static native void generateStream(long nativeHandle, String prompt,
         int maxTokens, float temperature, int topK, float topP,
-        float repeatPenalty, long seed, TokenCallback callback);
+        float repeatPenalty, long seed, String stopToken, TokenCallback callback);
+
+    /** 带 Grammar 约束的同步生成 */
+    private static native String generateWithGrammar(long nativeHandle, String prompt,
+        int maxTokens, float temperature, int topK, float topP,
+        float repeatPenalty, long seed, String stopToken, long grammarSamplerHandle);
+
+    /** 带 Grammar 约束的流式生成 */
+    private static native void generateStreamWithGrammar(long nativeHandle, String prompt,
+        int maxTokens, float temperature, int topK, float topP,
+        float repeatPenalty, long seed, String stopToken,
+        long grammarSamplerHandle, TokenCallback callback);
 
     /** 保存 KV 缓存会话状态 */
     private static native byte[] saveSession(long nativeHandle);
@@ -122,6 +133,27 @@ public final class LlamaContext implements AutoCloseable {
 
     /** 获取 KV 缓存中的 token 数量 */
     private static native int getKvCacheTokenCount(long nativeHandle);
+
+    /** 使用 llama.cpp 内置引擎渲染对话模板 */
+    private static native String applyChatTemplate(long nativeHandle, String[] roles, String[] contents, boolean addAssistant);
+
+    /** 创建 grammar 约束采样器 */
+    private static native long createGrammarSampler(long nativeHandle, String grammarStr, String grammarRoot);
+
+    /** 释放 grammar 采样器 */
+    private static native void freeGrammarSampler(long samplerHandle);
+
+    /** 生成文本嵌入向量 */
+    private static native float[] embed(long nativeHandle, String text);
+
+    /** 获取模型描述 */
+    private static native String getModelDesc(long nativeHandle);
+
+    /** 获取模型文件大小 */
+    private static native long getModelSize(long nativeHandle);
+
+    /** 获取模型参数数量 */
+    private static native long getModelNParams(long nativeHandle);
 
     /* ──────────────────────────────────────────
      *  公开 API — 分词
@@ -166,9 +198,25 @@ public final class LlamaContext implements AutoCloseable {
     public String generate(GenerateParams params) {
         ensureOpen();
         LOG.debug("开始同步生成 (maxTokens={}, temperature={})", params.maxTokens(), params.temperature());
-        return generate(nativeHandle, params.prompt(), params.maxTokens(),
-            params.temperature(), params.topK(), params.topP(),
-            params.repeatPenalty(), params.seed());
+        String stopToken = params.stopTokens() != null && !params.stopTokens().isEmpty()
+            ? params.stopTokens().get(0) : null;
+
+        GrammarConstraint grammar = resolveGrammar(params);
+        try {
+            if (grammar != null) {
+                return generateWithGrammar(nativeHandle, params.prompt(), params.maxTokens(),
+                    params.temperature(), params.topK(), params.topP(),
+                    params.repeatPenalty(), params.seed(), stopToken, grammar.handle());
+            }
+            return generate(nativeHandle, params.prompt(), params.maxTokens(),
+                params.temperature(), params.topK(), params.topP(),
+                params.repeatPenalty(), params.seed(), stopToken);
+        } finally {
+            // 如果是 jsonMode 自动创建的临时 grammar，用完关闭
+            if (grammar != null && params.grammar() == null) {
+                grammar.close();
+            }
+        }
     }
 
     /**
@@ -182,7 +230,7 @@ public final class LlamaContext implements AutoCloseable {
      */
     public void generateStream(String prompt, TokenCallback callback) {
         ensureOpen();
-        generateStream(nativeHandle, prompt, 2048, 0.7f, 40, 0.9f, 1.1f, -1L, callback);
+        generateStream(nativeHandle, prompt, 2048, 0.7f, 40, 0.9f, 1.1f, -1L, null, callback);
     }
 
     /**
@@ -193,9 +241,26 @@ public final class LlamaContext implements AutoCloseable {
      */
     public void generateStream(GenerateParams params, TokenCallback callback) {
         ensureOpen();
-        generateStream(nativeHandle, params.prompt(), params.maxTokens(),
-            params.temperature(), params.topK(), params.topP(),
-            params.repeatPenalty(), params.seed(), callback);
+        String stopToken = params.stopTokens() != null && !params.stopTokens().isEmpty()
+            ? params.stopTokens().get(0) : null;
+
+        GrammarConstraint grammar = resolveGrammar(params);
+        try {
+            if (grammar != null) {
+                generateStreamWithGrammar(nativeHandle, params.prompt(), params.maxTokens(),
+                    params.temperature(), params.topK(), params.topP(),
+                    params.repeatPenalty(), params.seed(), stopToken,
+                    grammar.handle(), callback);
+            } else {
+                generateStream(nativeHandle, params.prompt(), params.maxTokens(),
+                    params.temperature(), params.topK(), params.topP(),
+                    params.repeatPenalty(), params.seed(), stopToken, callback);
+            }
+        } finally {
+            if (grammar != null && params.grammar() == null) {
+                grammar.close();
+            }
+        }
     }
 
     /* ──────────────────────────────────────────
@@ -252,6 +317,90 @@ public final class LlamaContext implements AutoCloseable {
     }
 
     /* ──────────────────────────────────────────
+     *  公开 API — 聊天模板渲染
+     *  ────────────────────────────────────────── */
+
+    /**
+     * 使用 llama.cpp 内置引擎渲染对话模板。
+     *
+     * <p>此方法直接调用 llama_chat_apply_template，支持所有主流模型格式，
+     * 无需自定义 Jinja2 解析器。</p>
+     *
+     * @param roles     消息角色数组（如 "system", "user", "assistant"）
+     * @param contents  消息内容数组
+     * @param addAssistant 是否在末尾添加助手前缀
+     * @return 渲染后的提示词字符串
+     */
+    public String applyChatTemplate(String[] roles, String[] contents, boolean addAssistant) {
+        ensureOpen();
+        return applyChatTemplate(nativeHandle, roles, contents, addAssistant);
+    }
+
+    /* ──────────────────────────────────────────
+     *  公开 API — Grammar 约束生成
+     *  ────────────────────────────────────────── */
+
+    /**
+     * 创建 grammar 约束采样器，用于 JSON 模式等结构化输出。
+     *
+     * @param grammarStr  GBNF 语法字符串
+     * @param grammarRoot 根规则名称
+     * @return 采样器的不透明指针（需调用 freeGrammar 释放）
+     * @deprecated 使用 {@link GrammarConstraint#create(LlamaContext, String, String)} 代替
+     */
+    @Deprecated
+    public long createGrammar(String grammarStr, String grammarRoot) {
+        ensureOpen();
+        return createGrammarSampler(nativeHandle, grammarStr, grammarRoot);
+    }
+
+    /**
+     * 释放 grammar 采样器
+     * @deprecated 使用 {@link GrammarConstraint#close()} 代替
+     */
+    @Deprecated
+    public void freeGrammar(long grammarHandle) {
+        if (grammarHandle != 0) freeGrammarSampler(grammarHandle);
+    }
+
+    /* ──────────────────────────────────────────
+     *  公开 API — Embeddings 嵌入向量
+     *  ────────────────────────────────────────── */
+
+    /**
+     * 生成文本的嵌入向量。
+     *
+     * @param text 输入文本
+     * @return 嵌入向量浮点数组
+     */
+    public float[] embed(String text) {
+        ensureOpen();
+        return embed(nativeHandle, text);
+    }
+
+    /* ──────────────────────────────────────────
+     *  公开 API — 扩展元数据
+     *  ────────────────────────────────────────── */
+
+    /** @return 模型描述（如 "Qwen2 1.5B Q4_K_M"） */
+    public String getModelDescription() {
+        ensureOpen();
+        return getModelDesc(nativeHandle);
+    }
+
+    /** @return 模型文件大小（字节） */
+    public long getModelSize() {
+        ensureOpen();
+        return getModelSize(nativeHandle);
+    }
+
+    /** @return 模型参数数量 */
+    public long getModelParameterCount() {
+        ensureOpen();
+        return getModelNParams(nativeHandle);
+    }
+
+    /* ──────────────────────────────────────────
      *  生命周期管理
      *  ────────────────────────────────────────── */
 
@@ -281,6 +430,22 @@ public final class LlamaContext implements AutoCloseable {
      * <p>所有公开方法在调用原生函数前都会先执行此检查，
      * 防止在原生层访问已释放的内存（use-after-free）。</p>
      */
+    /**
+     * 解析生成参数中的 grammar 约束。
+     *
+     * <p>如果显式设置了 grammar，直接使用；如果开启了 jsonMode 但没有 grammar，
+     * 则自动创建一个 JSON grammar。后者会在生成完成后由调用方负责关闭。</p>
+     */
+    private GrammarConstraint resolveGrammar(GenerateParams params) {
+        if (params.grammar() != null) {
+            return params.grammar();
+        }
+        if (params.jsonMode()) {
+            return GrammarConstraint.json(this);
+        }
+        return null;
+    }
+
     private void ensureOpen() {
         if (closed) {
             throw new IllegalStateException("LlamaContext 已关闭，不能再使用");

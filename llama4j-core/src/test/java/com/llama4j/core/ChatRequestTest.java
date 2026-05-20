@@ -2,6 +2,7 @@ package com.llama4j.core;
 
 import com.llama4j.chat.Message;
 import com.llama4j.chat.Role;
+import com.llama4j.native_.GrammarConstraint;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -107,14 +108,14 @@ class ChatRequestTest {
         @DisplayName("should throw on empty messages list")
         void shouldThrowOnEmptyMessages() {
             assertThrows(IllegalArgumentException.class,
-                    () -> new ChatRequest(List.of(), 0.7f, 2048, 40, 0.9f, 1.1f, -1L));
+                    () -> new ChatRequest(List.of(), 0.7f, 2048, 40, 0.9f, 1.1f, -1L, List.of(), null, false));
         }
 
         @Test
         @DisplayName("should throw on null messages list")
         void shouldThrowOnNullMessages() {
             assertThrows(NullPointerException.class,
-                    () -> new ChatRequest(null, 0.7f, 2048, 40, 0.9f, 1.1f, -1L));
+                    () -> new ChatRequest(null, 0.7f, 2048, 40, 0.9f, 1.1f, -1L, List.of(), null, false));
         }
 
         @Test
@@ -126,6 +127,43 @@ class ChatRequestTest {
 
             assertThrows(UnsupportedOperationException.class,
                     () -> request.messages().add(Message.user("extra")));
+        }
+    }
+
+    @Nested
+    @DisplayName("grammar and jsonMode")
+    class GrammarTests {
+
+        @Test
+        @DisplayName("grammar should default to null")
+        void grammarDefaultsToNull() {
+            ChatRequest request = ChatRequest.builder()
+                    .addMessage(Role.USER, "Hi")
+                    .build();
+
+            assertNull(request.grammar());
+        }
+
+        @Test
+        @DisplayName("jsonMode should default to false")
+        void jsonModeDefaultsToFalse() {
+            ChatRequest request = ChatRequest.builder()
+                    .addMessage(Role.USER, "Hi")
+                    .build();
+
+            assertFalse(request.jsonMode());
+        }
+
+        @Test
+        @DisplayName("should enable jsonMode via builder")
+        void shouldEnableJsonMode() {
+            ChatRequest request = ChatRequest.builder()
+                    .addMessage(Role.USER, "Generate JSON")
+                    .jsonMode(true)
+                    .build();
+
+            assertTrue(request.jsonMode());
+            assertNull(request.grammar());
         }
     }
 }

@@ -146,7 +146,8 @@ Java_com_llama4j_native_1_LlamaContext_generate(
     jlong nativeHandle, jstring prompt,
     jint maxTokens, jfloat temperature,
     jint topK, jfloat topP,
-    jfloat repeatPenalty, jlong seed);
+    jfloat repeatPenalty, jlong seed,
+    jstring stopToken);
 
 /**
  * 执行流式文本生成，每生成一个 token 就通过回调通知 Java 层。
@@ -172,6 +173,7 @@ Java_com_llama4j_native_1_LlamaContext_generateStream(
     jint maxTokens, jfloat temperature,
     jint topK, jfloat topP,
     jfloat repeatPenalty, jlong seed,
+    jstring stopToken,
     jobject callback);
 
 /* ──────────────────────────────────────────────────────────────
@@ -267,6 +269,83 @@ Java_com_llama4j_native_1_LlamaContext_getContextSize(
  */
 JNIEXPORT jint JNICALL
 Java_com_llama4j_native_1_LlamaContext_getKvCacheTokenCount(
+    JNIEnv *env, jclass clazz, jlong nativeHandle);
+
+/* ──────────────────────────────────────────────────────────────
+ *  聊天模板渲染
+ *  ────────────────────────────────────────────────────────────── */
+
+JNIEXPORT jstring JNICALL
+Java_com_llama4j_native_1_LlamaContext_applyChatTemplate(
+    JNIEnv *env, jclass clazz,
+    jlong nativeHandle, jobjectArray roles, jobjectArray contents, jboolean addAssistant);
+
+/* ──────────────────────────────────────────────────────────────
+ *  Grammar 约束生成
+ *  ────────────────────────────────────────────────────────────── */
+
+JNIEXPORT jlong JNICALL
+Java_com_llama4j_native_1_LlamaContext_createGrammarSampler(
+    JNIEnv *env, jclass clazz, jlong nativeHandle, jstring grammarStr, jstring grammarRoot);
+
+JNIEXPORT void JNICALL
+Java_com_llama4j_native_1_LlamaContext_freeGrammarSampler(
+    JNIEnv *env, jclass clazz, jlong samplerHandle);
+
+/**
+ * 带 Grammar 约束的同步生成。
+ *
+ * 与 generate 相同，但在采样链中插入 grammar sampler，
+ * 确保输出符合指定语法。
+ *
+ * @param grammarSamplerHandle  grammar sampler 的不透明指针（0 = 不使用约束）
+ */
+JNIEXPORT jstring JNICALL
+Java_com_llama4j_native_1_LlamaContext_generateWithGrammar(
+    JNIEnv *env, jclass clazz,
+    jlong nativeHandle, jstring prompt,
+    jint maxTokens, jfloat temperature,
+    jint topK, jfloat topP,
+    jfloat repeatPenalty, jlong seed,
+    jstring stopToken, jlong grammarSamplerHandle);
+
+/**
+ * 带 Grammar 约束的流式生成。
+ *
+ * @param grammarSamplerHandle  grammar sampler 的不透明指针（0 = 不使用约束）
+ */
+JNIEXPORT void JNICALL
+Java_com_llama4j_native_1_LlamaContext_generateStreamWithGrammar(
+    JNIEnv *env, jclass clazz,
+    jlong nativeHandle, jstring prompt,
+    jint maxTokens, jfloat temperature,
+    jint topK, jfloat topP,
+    jfloat repeatPenalty, jlong seed,
+    jstring stopToken, jlong grammarSamplerHandle,
+    jobject callback);
+
+/* ──────────────────────────────────────────────────────────────
+ *  Embeddings 嵌入向量
+ *  ────────────────────────────────────────────────────────────── */
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_llama4j_native_1_LlamaContext_embed(
+    JNIEnv *env, jclass clazz, jlong nativeHandle, jstring text);
+
+/* ──────────────────────────────────────────────────────────────
+ *  模型元数据扩展查询
+ *  ────────────────────────────────────────────────────────────── */
+
+JNIEXPORT jstring JNICALL
+Java_com_llama4j_native_1_LlamaContext_getModelDesc(
+    JNIEnv *env, jclass clazz, jlong nativeHandle);
+
+JNIEXPORT jlong JNICALL
+Java_com_llama4j_native_1_LlamaContext_getModelSize(
+    JNIEnv *env, jclass clazz, jlong nativeHandle);
+
+JNIEXPORT jlong JNICALL
+Java_com_llama4j_native_1_LlamaContext_getModelNParams(
     JNIEnv *env, jclass clazz, jlong nativeHandle);
 
 #ifdef __cplusplus

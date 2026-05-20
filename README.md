@@ -105,6 +105,7 @@ load balancing, health checks ×2, latency tax.    Zero DevOps overhead.
 │  ┌────────────────────────────────────────────────────────────────────────┐  │
 │  │                        LlamaContext                                    │  │
 │  │   generate() / generateStream() / tokenize() / saveSession()          │  │
+│  │   embed() / GrammarConstraint / EmbeddingVector                       │  │
 │  │   Thread-safe (std::mutex) | Zero-copy buffers | Use-after-free guard  │  │
 │  └────────────────────────────────────────────────────────────────────────┘  │
 │  ┌──────────────────────────┐  ┌─────────────────────────────────────────┐  │
@@ -207,6 +208,29 @@ public class WeatherTools {
 // LLM automatically invokes tools in a ReAct loop -- no prompt engineering needed
 ```
 
+### Grammar-Constrained Generation & JSON Mode
+
+Force structured output with GBNF grammar constraints:
+
+```java
+// One-flag JSON mode
+ChatRequest.builder().jsonMode(true).addMessage(Role.USER, "...").build();
+
+// Custom grammar with AutoCloseable lifecycle
+try (GrammarConstraint gc = GrammarConstraint.create(ctx, gbnf, "root")) {
+    params = GenerateParams.builder("...").grammar(gc).build();
+}
+```
+
+### Embedding Vectors & Similarity Search
+
+```java
+EmbeddingService service = new EmbeddingService(ctx);
+EmbeddingVector vec = service.embed("text");
+double score = service.similarity("cat", "dog");
+List<SimilarityResult> topK = service.findMostSimilar("query", candidates, 5);
+```
+
 ### 10+ Chat Template Formats
 
 Auto-detected from GGUF metadata -- zero configuration:
@@ -275,8 +299,8 @@ String quant = repo.recommendQuantization(7.0); // 7B model
 
 | Module | Purpose |
 |--------|---------|
-| **llama4j-native** | JNI bridge to llama.cpp. Thread-safe `LlamaContext`, zero-copy buffers, platform-aware native loader |
-| **llama4j-core** | `ChatService`, `SessionManager`, `InferenceStats` -- the orchestration layer |
+| **llama4j-native** | JNI bridge to llama.cpp. `LlamaContext`, `GrammarConstraint`, `EmbeddingVector`, `GenerateParams` -- native resource management |
+| **llama4j-core** | `ChatService`, `EmbeddingService`, `SessionManager`, `InferenceStats`, `ChatTemplateUtil` -- the orchestration layer |
 | **llama4j-chat** | Chat template engine with 10+ formats and Jinja2 parser |
 | **llama4j-tools** | `@Tool` annotation-driven function calling with ReAct loop |
 | **llama4j-metrics** | Micrometer integration with 8 core metrics |
@@ -287,6 +311,74 @@ String quant = repo.recommendQuantization(7.0); // 7B model
 ---
 
 ## Advanced Usage
+
+### JSON Mode / Grammar Constraints
+
+Force the model to output valid JSON (or any GBNF grammar):
+
+```java
+// Simple JSON mode — one flag
+ChatRequest request = ChatRequest.builder()
+    .system("You are a data extraction assistant.")
+    .addMessage(Role.USER, "Extract name and age from: John is 30 years old")
+    .jsonMode(true)
+    .build();
+ChatResponse response = service.chat(request);
+// Output: {"name": "John", "age": 30}
+
+// Custom grammar with lifecycle management
+try (GrammarConstraint gc = GrammarConstraint.json(ctx)) {
+    GenerateParams params = GenerateParams.builder("Generate a JSON array of colors")
+        .grammar(gc)
+        .maxTokens(256)
+        .build();
+    String result = ctx.generate(params);
+}  // gc.close() called automatically
+
+// Custom GBNF grammar (e.g., only output specific values)
+try (GrammarConstraint gc = GrammarConstraint.create(ctx, myGbnf, "root")) {
+    // ...
+}
+```
+
+### Embedding Vectors & Similarity
+
+```java
+try (LlamaContext ctx = new LlamaContext(modelPath, ModelParams.DEFAULT)) {
+    EmbeddingService embedService = new EmbeddingService(ctx);
+
+    // Single text embedding
+    EmbeddingVector vec = embedService.embed("机器学习是人工智能的一个分支");
+
+    // Similarity between two texts
+    double score = embedService.similarity("猫是宠物", "狗是宠物");  // ~0.85
+
+    // Find most similar documents
+    List<String> docs = List.of("Java是编程语言", "猫是哺乳动物", "Python是脚本语言");
+    List<SimilarityResult> top2 = embedService.findMostSimilar("编程", docs, 2);
+    // → [SimilarityResult("Java是编程语言", 0.92), SimilarityResult("Python是脚本语言", 0.88)]
+
+    // Direct vector operations
+    EmbeddingVector v1 = embedService.embed("hello");
+    EmbeddingVector v2 = embedService.embed("world");
+    double cosine = v1.cosineSimilarity(v2);
+    double dist = v1.euclideanDistance(v2);
+}
+```
+
+### Chat Template Utility
+
+```java
+// Render messages to prompt string using model's embedded template
+List<Message> messages = List.of(
+    Message.system("You are helpful."),
+    Message.user("Hello!")
+);
+String prompt = ChatTemplateUtil.applyTemplate(ctx, messages, true);
+
+// Or use ChatService's public renderPrompt
+String prompt = chatService.renderPrompt(messages);
+```
 
 ### Streaming with SSE
 
@@ -309,8 +401,20 @@ try (LlamaContext ctx = new LlamaContext("/models/qwen2.5-7b.gguf", ModelParams.
     // Streaming
     ctx.generateStream("Tell me a story", token -> System.out.print(token));
 
+    // JSON mode via GenerateParams
+    String json = ctx.generate(GenerateParams.builder("Generate a user profile")
+        .jsonMode(true).maxTokens(256).build());
+
     // Tokenization
     int[] tokens = ctx.tokenize("Hello world");
+
+    // Embeddings
+    float[] embedding = ctx.embed("Hello world");
+
+    // Model metadata
+    System.out.println(ctx.getModelDescription());  // "Qwen2 1.5B Q4_K_M"
+    System.out.println(ctx.getModelSize());          // 1117320736
+    System.out.println(ctx.getModelParameterCount()); // 1543714304
 
     // KV cache save/restore
     SessionState state = ctx.saveSession();

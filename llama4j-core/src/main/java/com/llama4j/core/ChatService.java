@@ -9,6 +9,7 @@ import com.llama4j.native_.TokenCallback;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 import java.util.Objects;
@@ -58,9 +59,9 @@ public final class ChatService {
 
     private static final Logger LOG = LoggerFactory.getLogger(ChatService.class);
 
-    /** 匹配多轮对话中的回合边界标记，用于清理小模型的幻觉输出 */
     private static final Pattern TURN_BOUNDARY = Pattern.compile(
-        "<\\|im_end\\|>|<\\|im_start\\|>|<\\|eot_id\\|>|<\\|start_header_id\\|>|\\[/INST\\]|\\[INST\\]"
+        "<\\|im_end\\|>|<\\|im_start\\|>|<\\|eot_id\\|>|<\\|start_header_id\\|>|" +
+        "\\[/INST\\]|\\[INST\\]|\\[User\\]|\\[Assistant\\]|\\[System\\]|\\[Tool\\]"
     );
 
     /** 原生推理上下文 */
@@ -119,6 +120,7 @@ public final class ChatService {
         LOG.debug("渲染后的提示词长度: {} 字符", prompt.length());
 
         // 步骤 2：构造生成参数
+        List<String> stopTokens = resolveStopTokens(request);
         GenerateParams params = GenerateParams.builder(prompt)
             .maxTokens(request.maxTokens())
             .temperature(request.temperature())
@@ -126,6 +128,9 @@ public final class ChatService {
             .topP(request.topP())
             .repeatPenalty(request.repeatPenalty())
             .seed(request.seed())
+            .stopTokens(stopTokens)
+            .grammar(request.grammar())
+            .jsonMode(request.jsonMode())
             .build();
 
         // 步骤 3：执行推理
@@ -177,6 +182,7 @@ public final class ChatService {
                 // 用于收集所有生成的 token
                 StringBuilder resultBuilder = new StringBuilder();
 
+                List<String> stopTokens = resolveStopTokens(request);
                 GenerateParams params = GenerateParams.builder(prompt)
                     .maxTokens(request.maxTokens())
                     .temperature(request.temperature())
@@ -184,6 +190,9 @@ public final class ChatService {
                     .topP(request.topP())
                     .repeatPenalty(request.repeatPenalty())
                     .seed(request.seed())
+                    .stopTokens(stopTokens)
+                    .grammar(request.grammar())
+                    .jsonMode(request.jsonMode())
                     .build();
 
                 // 执行流式推理，逐 token 回调
@@ -234,11 +243,37 @@ public final class ChatService {
      * 通过模板引擎将消息列表渲染为提示词字符串。
      *
      * <p>模板引擎会自动检测模型内嵌的对话模板格式（Llama 3、ChatML 等），
-     * 并使用对应的格式化规则将消息列表转换为模型可理解的输入。</p>
+     * 并使用对应的格式化规则将消息列表转换为模型可理解的输入。
+     * 优先使用 llama.cpp 内置模板引擎，失败时回退到 Java 实现。</p>
+     *
+     * @param messages 消息列表
+     * @return 渲染后的提示词字符串
      */
-    private String renderPrompt(List<Message> messages) {
-        String chatTemplate = context.getChatTemplate();
-        return templateEngine.renderConversation(chatTemplate, messages);
+    public String renderPrompt(List<Message> messages) {
+        try {
+            String[] roles = messages.stream().map(m -> m.role().value()).toArray(String[]::new);
+            String[] contents = messages.stream().map(Message::content).toArray(String[]::new);
+            return context.applyChatTemplate(roles, contents, true);
+        } catch (Exception e) {
+            LOG.warn("原生模板渲染失败，回退到 Java 模板引擎: {}", e.getMessage());
+            String chatTemplate = context.getChatTemplate();
+            return templateEngine.renderConversation(chatTemplate, messages);
+        }
+    }
+
+    private List<String> resolveStopTokens(ChatRequest request) {
+        List<String> tokens = new ArrayList<>(request.stopTokens());
+        if (tokens.isEmpty()) {
+            String chatTemplate = context.getChatTemplate();
+            if (chatTemplate != null) {
+                if (chatTemplate.contains("<|im_start|>")) {
+                    tokens.add("<|im_end|>");
+                } else if (chatTemplate.contains("<|eot_id|>")) {
+                    tokens.add("<|eot_id|>");
+                }
+            }
+        }
+        return tokens;
     }
 
     /* ──────────────────────────────────────────

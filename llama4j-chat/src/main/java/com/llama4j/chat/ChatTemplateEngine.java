@@ -82,25 +82,44 @@ public final class ChatTemplateEngine {
      * @return 格式化后的提示词字符串
      */
     public String renderConversation(String chatTemplate, List<Message> messages) {
-        // 策略 1：尝试匹配已知格式
         if (chatTemplate != null && !chatTemplate.isBlank()) {
             for (ChatFormat format : formats) {
                 if (format.matches(chatTemplate)) {
-                    LOG.debug("匹配到对话格式: {}", format.name());
+                    LOG.debug("Matched format: {}", format.name());
                     return format.render(messages);
                 }
             }
 
-            // 策略 2：使用 Jinja2 解析器渲染
             if (looksLikeJinja2(chatTemplate)) {
-                LOG.debug("使用 Jinja2 解析器渲染模板");
+                LOG.debug("Using Jinja2 parser for template");
                 return renderWithJinja2(chatTemplate, messages);
+            }
+
+            LOG.debug("Template not recognized, trying direct ChatML");
+            String rendered = tryDirectChatML(messages);
+            if (rendered != null) {
+                LOG.debug("Using direct ChatML rendering");
+                return rendered;
             }
         }
 
-        // 策略 3：兜底格式
-        LOG.debug("无法识别模板格式，使用默认格式");
+        LOG.debug("Using default format");
         return new DefaultFormat().render(messages);
+    }
+
+    private String tryDirectChatML(List<Message> messages) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            for (Message msg : messages) {
+                sb.append("<|im_start|>").append(msg.role().value()).append("\n");
+                sb.append(msg.content()).append("<|im_end|>\n");
+            }
+            sb.append("<|im_start|>assistant\n");
+            return sb.toString();
+        } catch (Exception e) {
+            LOG.warn("直接 ChatML 渲染失败: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -119,7 +138,8 @@ public final class ChatTemplateEngine {
     /** 检查模板是否包含 Jinja2 特征标记 */
     private boolean looksLikeJinja2(String template) {
         return (template.contains("{{") && template.contains("}}"))
-            || (template.contains("{%") && template.contains("%}"));
+            || (template.contains("{%") && template.contains("%}"))
+            || (template.contains("{%-") && template.contains("-%}"));
     }
 
     /** 使用 Jinja2 解析器渲染模板 */

@@ -44,9 +44,10 @@ public final class TemplateParser {
      */
     public static String render(String template, Map<String, Object> context) {
         List<Node> nodes = parse(template);
+        Map<String, Object> mutableContext = new HashMap<>(context);
         StringBuilder output = new StringBuilder();
         for (Node node : nodes) {
-            output.append(node.evaluate(context));
+            output.append(node.evaluate(mutableContext));
         }
         return output.toString();
     }
@@ -249,28 +250,36 @@ public final class TemplateParser {
     private static List<Node> parseNodes(Tokenizer tokenizer) {
         List<Node> nodes = new ArrayList<>();
         while (tokenizer.hasNext()) {
-            String token = tokenizer.next();
+            String token = tokenizer.peek();
             if (token == null) break;
 
             if (token.startsWith("{{") && token.endsWith("}}")) {
-                // 变量插值
+                tokenizer.next();
                 String expr = token.substring(2, token.length() - 2);
                 nodes.add(new VariableNode(expr));
             } else if (token.startsWith("{%") && token.endsWith("%}")) {
-                // 控制流标签
                 String content = token.substring(2, token.length() - 2).trim();
                 String keyword = content.split("\\s+")[0];
 
                 if ("for".equals(keyword)) {
+                    tokenizer.next();
                     nodes.add(parseFor(content, tokenizer));
                 } else if ("if".equals(keyword)) {
+                    tokenizer.next();
                     nodes.add(parseIf(content, tokenizer));
                 } else if ("set".equals(keyword)) {
+                    tokenizer.next();
                     nodes.add(parseSet(content));
+                } else if ("else".equals(keyword) || "elif".equals(keyword)
+                        || "endif".equals(keyword) || "endfor".equals(keyword)) {
+                    // 控制流边界 — 不消费，交由调用方处理
+                    break;
+                } else {
+                    tokenizer.next();
+                    nodes.add(new TextNode(token));
                 }
-                // endfor / endif / else / elif 由父级解析器处理
             } else {
-                // 纯文本
+                tokenizer.next();
                 nodes.add(new TextNode(token));
             }
         }
@@ -284,6 +293,16 @@ public final class TemplateParser {
         String varName = parts[1];
         String iterableExpr = content.substring(content.indexOf(" in ") + 4).trim();
         List<Node> body = parseBlock(tokenizer, "endfor");
+        // 消费 endfor
+        if (tokenizer.hasNext()) {
+            String token = tokenizer.peek();
+            if (token != null && token.startsWith("{%") && token.endsWith("%}")) {
+                String tagContent = token.substring(2, token.length() - 2).trim();
+                if ("endfor".equals(tagContent)) {
+                    tokenizer.next();
+                }
+            }
+        }
         return new ForNode(varName, iterableExpr, body);
     }
 
@@ -293,31 +312,34 @@ public final class TemplateParser {
         List<Node> thenBody = new ArrayList<>();
         List<Node> elseBody = new ArrayList<>();
 
-        List<Node> current = thenBody;
+        // 解析 then 分支
+        thenBody.addAll(parseNodes(tokenizer));
+
+        // 处理 else / elif / endif
         while (tokenizer.hasNext()) {
             String token = tokenizer.peek();
             if (token == null) break;
 
             if (token.startsWith("{%") && token.endsWith("%}")) {
                 String tagContent = token.substring(2, token.length() - 2).trim();
-                if ("endif".equals(tagContent)) {
-                    tokenizer.next(); // 消费 endif
-                    break;
-                } else if ("else".equals(tagContent)) {
+                if ("else".equals(tagContent)) {
                     tokenizer.next(); // 消费 else
-                    current = elseBody;
-                    continue;
+                    elseBody.addAll(parseNodes(tokenizer));
                 } else if (tagContent.startsWith("elif")) {
                     tokenizer.next(); // 消费 elif
-                    // 将 elif 作为嵌套 if 处理
                     String elifCondition = tagContent.substring(5).trim();
-                    List<Node> elifBody = parseBlock(tokenizer, "endif");
-                    current = elseBody;
-                    current.add(new IfNode(elifCondition, elifBody, List.of()));
+                    // 递归处理剩余的 elif/else/endif
+                    IfNode elifNode = parseIf("if " + elifCondition, tokenizer);
+                    elseBody.add(elifNode);
+                } else if ("endif".equals(tagContent)) {
+                    tokenizer.next(); // 消费 endif
+                    break;
+                } else {
                     break;
                 }
+            } else {
+                break;
             }
-            current.addAll(parseNodes(tokenizer));
         }
 
         return new IfNode(condition, thenBody, elseBody);
@@ -331,7 +353,7 @@ public final class TemplateParser {
         return new SetNode(parts[0].trim(), parts[1].trim());
     }
 
-    /** 解析直到遇到结束标签 */
+    /** 解析直到遇到结束标签或控制流边界 */
     private static List<Node> parseBlock(Tokenizer tokenizer, String endTag) {
         List<Node> nodes = new ArrayList<>();
         while (tokenizer.hasNext()) {
@@ -340,12 +362,15 @@ public final class TemplateParser {
 
             if (token.startsWith("{%") && token.endsWith("%}")) {
                 String tagContent = token.substring(2, token.length() - 2).trim();
-                if (endTag.equals(tagContent)) {
-                    tokenizer.next(); // 消费结束标签
+                if (endTag.equals(tagContent)
+                        || "else".equals(tagContent) || "elif".equals(tagContent)) {
+                    // 结束标签或控制流边界 — 不消费，交由调用方处理
                     break;
                 }
             }
-            nodes.addAll(parseNodes(tokenizer));
+            List<Node> parsed = parseNodes(tokenizer);
+            if (parsed.isEmpty()) break; // parseNodes 在边界处返回空列表
+            nodes.addAll(parsed);
         }
         return nodes;
     }

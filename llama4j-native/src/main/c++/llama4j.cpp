@@ -131,12 +131,15 @@ Java_com_llama4j_native_1_LlamaContext_loadModel(
         return 0;
     }
 
-    std::string chatTemplate;
-    int tmplLen = llama_model_meta_val_str(model, "chat_template", nullptr, 0);
-    if (tmplLen > 0) {
-        chatTemplate.resize(tmplLen + 1);
-        llama_model_meta_val_str(model, "chat_template",
-            chatTemplate.data(), chatTemplate.size());
+std::string chatTemplate;
+    const char* keys[] = {"tokenizer.chat_template", "chat_template"};
+    for (auto key : keys) {
+        int tmplLen = llama_model_meta_val_str(model, key, nullptr, 0);
+        if (tmplLen > 0) {
+            chatTemplate.resize(tmplLen);
+            llama_model_meta_val_str(model, key, chatTemplate.data(), tmplLen + 1);
+            break;
+        }
     }
 
     auto *session = new LlamaSession();
@@ -205,7 +208,8 @@ Java_com_llama4j_native_1_LlamaContext_generate(
     jlong nativeHandle, jstring prompt,
     jint maxTokens, jfloat temperature,
     jint topK, jfloat topP,
-    jfloat repeatPenalty, jlong seed)
+    jfloat repeatPenalty, jlong seed,
+    jstring stopToken)
 {
     if (nativeHandle == 0) return env->NewStringUTF("");
     auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
@@ -216,9 +220,17 @@ Java_com_llama4j_native_1_LlamaContext_generate(
     std::string promptText(promptStr);
     env->ReleaseStringUTFChars(prompt, promptStr);
 
+    std::string stopTokenStr;
+    if (stopToken != nullptr) {
+        const char *stopStr = env->GetStringUTFChars(stopToken, nullptr);
+        stopTokenStr = stopStr;
+        env->ReleaseStringUTFChars(stopToken, stopStr);
+    }
+
     const llama_vocab *vocab = llama_model_get_vocab(session->model);
     std::vector<llama_token> tokens = tokenizeHelper(vocab, promptText, true);
 
+    llama_memory_seq_rm(llama_get_memory(session->ctx), -1, -1, -1);
     llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
     llama_decode(session->ctx, batch);
 
@@ -242,7 +254,14 @@ Java_com_llama4j_native_1_LlamaContext_generate(
 
         if (llama_vocab_is_eog(vocab, newToken)) break;
 
-        result += tokenToPiece(vocab, newToken);
+        std::string piece = tokenToPiece(vocab, newToken);
+        result += piece;
+
+        if (!stopTokenStr.empty() && result.find(stopTokenStr) != std::string::npos) {
+            size_t pos = result.find(stopTokenStr);
+            result = result.substr(0, pos);
+            break;
+        }
 
         batch = llama_batch_get_one(&newToken, 1);
         llama_decode(session->ctx, batch);
@@ -260,6 +279,7 @@ Java_com_llama4j_native_1_LlamaContext_generateStream(
     jint maxTokens, jfloat temperature,
     jint topK, jfloat topP,
     jfloat repeatPenalty, jlong seed,
+    jstring stopToken,
     jobject callback)
 {
     if (nativeHandle == 0 || !callback) return;
@@ -274,8 +294,16 @@ Java_com_llama4j_native_1_LlamaContext_generateStream(
     std::string promptText(promptStr);
     env->ReleaseStringUTFChars(prompt, promptStr);
 
+    std::string stopTokenStr;
+    if (stopToken != nullptr) {
+        const char *stopStr = env->GetStringUTFChars(stopToken, nullptr);
+        stopTokenStr = stopStr;
+        env->ReleaseStringUTFChars(stopToken, stopStr);
+    }
+
     const llama_vocab *vocab = llama_model_get_vocab(session->model);
     std::vector<llama_token> tokens = tokenizeHelper(vocab, promptText, true);
+    llama_memory_seq_rm(llama_get_memory(session->ctx), -1, -1, -1);
     llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
     llama_decode(session->ctx, batch);
 
@@ -291,6 +319,7 @@ Java_com_llama4j_native_1_LlamaContext_generateStream(
         llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
     }
 
+    std::string result;
     session->lastTokens = tokens;
 
     for (int i = 0; i < maxTokens; i++) {
@@ -298,6 +327,11 @@ Java_com_llama4j_native_1_LlamaContext_generateStream(
         if (llama_vocab_is_eog(vocab, newToken)) break;
 
         std::string piece = tokenToPiece(vocab, newToken);
+        result += piece;
+
+        if (!stopTokenStr.empty() && result.find(stopTokenStr) != std::string::npos) {
+            break;
+        }
 
         jstring jPiece = env->NewStringUTF(piece.c_str());
         env->CallVoidMethod(callback, onTokenMethod, jPiece);
@@ -392,4 +426,306 @@ Java_com_llama4j_native_1_LlamaContext_getKvCacheTokenCount(
     if (nativeHandle == 0) return 0;
     auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
     return static_cast<jint>(session->lastTokens.size());
+}
+
+/* ──────────────────────────────────────────────────────────────
+ *  聊天模板渲染 — 使用 llama.cpp 内置模板引擎
+ *  ────────────────────────────────────────────────────────────── */
+
+JNIEXPORT jstring JNICALL
+Java_com_llama4j_native_1_LlamaContext_applyChatTemplate(
+    JNIEnv *env, jclass clazz,
+    jlong nativeHandle, jobjectArray roles, jobjectArray contents, jboolean addAssistant)
+{
+    if (nativeHandle == 0) return env->NewStringUTF("");
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+
+    jsize nMsg = env->GetArrayLength(roles);
+    std::vector<llama_chat_message> messages(nMsg);
+
+    for (jsize i = 0; i < nMsg; i++) {
+        auto roleStr = (jstring) env->GetObjectArrayElement(roles, i);
+        auto contentStr = (jstring) env->GetObjectArrayElement(contents, i);
+        messages[i].role = env->GetStringUTFChars(roleStr, nullptr);
+        messages[i].content = env->GetStringUTFChars(contentStr, nullptr);
+        env->DeleteLocalRef(roleStr);
+        env->DeleteLocalRef(contentStr);
+    }
+
+    const char *tmpl = session->chatTemplate.empty() ? nullptr : session->chatTemplate.c_str();
+
+    int len = llama_chat_apply_template(tmpl, messages.data(), nMsg, addAssistant, nullptr, 0);
+    std::vector<char> buf(len + 1);
+    llama_chat_apply_template(tmpl, messages.data(), nMsg, addAssistant, buf.data(), buf.size());
+
+    for (jsize i = 0; i < nMsg; i++) {
+        auto roleStr = (jstring) env->GetObjectArrayElement(roles, i);
+        auto contentStr = (jstring) env->GetObjectArrayElement(contents, i);
+        env->ReleaseStringUTFChars(roleStr, messages[i].role);
+        env->ReleaseStringUTFChars(contentStr, messages[i].content);
+        env->DeleteLocalRef(roleStr);
+        env->DeleteLocalRef(contentStr);
+    }
+
+    return env->NewStringUTF(buf.data());
+}
+
+/* ──────────────────────────────────────────────────────────────
+ *  Grammar 约束生成
+ *  ────────────────────────────────────────────────────────────── */
+
+JNIEXPORT jlong JNICALL
+Java_com_llama4j_native_1_LlamaContext_createGrammarSampler(
+    JNIEnv *env, jclass clazz, jlong nativeHandle, jstring grammarStr, jstring grammarRoot)
+{
+    if (nativeHandle == 0 || !grammarStr) return 0;
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+
+    const char *gStr = env->GetStringUTFChars(grammarStr, nullptr);
+    const char *gRoot = grammarRoot ? env->GetStringUTFChars(grammarRoot, nullptr) : "root";
+
+    const llama_vocab *vocab = llama_model_get_vocab(session->model);
+    auto *sampler = llama_sampler_init_grammar(vocab, gStr, gRoot);
+
+    env->ReleaseStringUTFChars(grammarStr, gStr);
+    if (grammarRoot) env->ReleaseStringUTFChars(grammarRoot, gRoot);
+
+    return reinterpret_cast<jlong>(sampler);
+}
+
+JNIEXPORT void JNICALL
+Java_com_llama4j_native_1_LlamaContext_freeGrammarSampler(
+    JNIEnv *env, jclass clazz, jlong samplerHandle)
+{
+    if (samplerHandle == 0) return;
+    llama_sampler_free(reinterpret_cast<llama_sampler *>(samplerHandle));
+}
+
+/* ──────────────────────────────────────────────────────────────
+ *  带 Grammar 约束的推理生成
+ *  ────────────────────────────────────────────────────────────── */
+
+JNIEXPORT jstring JNICALL
+Java_com_llama4j_native_1_LlamaContext_generateWithGrammar(
+    JNIEnv *env, jclass clazz,
+    jlong nativeHandle, jstring prompt,
+    jint maxTokens, jfloat temperature,
+    jint topK, jfloat topP,
+    jfloat repeatPenalty, jlong seed,
+    jstring stopToken, jlong grammarSamplerHandle)
+{
+    if (nativeHandle == 0) return env->NewStringUTF("");
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+
+    std::lock_guard<std::mutex> lock(session->mutex);
+
+    const char *promptStr = env->GetStringUTFChars(prompt, nullptr);
+    std::string promptText(promptStr);
+    env->ReleaseStringUTFChars(prompt, promptStr);
+
+    std::string stopTokenStr;
+    if (stopToken != nullptr) {
+        const char *stopStr = env->GetStringUTFChars(stopToken, nullptr);
+        stopTokenStr = stopStr;
+        env->ReleaseStringUTFChars(stopToken, stopStr);
+    }
+
+    const llama_vocab *vocab = llama_model_get_vocab(session->model);
+    std::vector<llama_token> tokens = tokenizeHelper(vocab, promptText, true);
+
+    llama_memory_seq_rm(llama_get_memory(session->ctx), -1, -1, -1);
+    llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
+    llama_decode(session->ctx, batch);
+
+    auto *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(smpl, llama_sampler_init_penalties(
+        64, repeatPenalty, 0.0f, 0.0f));
+    if (temperature > 0.0f) {
+        llama_sampler_chain_add(smpl, llama_sampler_init_temp(temperature));
+        llama_sampler_chain_add(smpl, llama_sampler_init_top_k(topK));
+        llama_sampler_chain_add(smpl, llama_sampler_init_top_p(topP, 1));
+    }
+
+    // 插入 grammar sampler（在 distribution 之前）
+    if (grammarSamplerHandle != 0) {
+        llama_sampler_chain_add(smpl,
+            reinterpret_cast<llama_sampler *>(grammarSamplerHandle));
+    }
+
+    if (temperature > 0.0f) {
+        llama_sampler_chain_add(smpl, llama_sampler_init_dist(seed >= 0 ? seed : (uint32_t)time(nullptr)));
+    } else {
+        llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
+    }
+
+    std::string result;
+    session->lastTokens = tokens;
+
+    for (int i = 0; i < maxTokens; i++) {
+        llama_token newToken = llama_sampler_sample(smpl, session->ctx, -1);
+
+        if (llama_vocab_is_eog(vocab, newToken)) break;
+
+        std::string piece = tokenToPiece(vocab, newToken);
+        result += piece;
+
+        if (!stopTokenStr.empty() && result.find(stopTokenStr) != std::string::npos) {
+            size_t pos = result.find(stopTokenStr);
+            result = result.substr(0, pos);
+            break;
+        }
+
+        batch = llama_batch_get_one(&newToken, 1);
+        llama_decode(session->ctx, batch);
+        session->lastTokens.push_back(newToken);
+    }
+
+    llama_sampler_free(smpl);
+    return env->NewStringUTF(result.c_str());
+}
+
+JNIEXPORT void JNICALL
+Java_com_llama4j_native_1_LlamaContext_generateStreamWithGrammar(
+    JNIEnv *env, jclass clazz,
+    jlong nativeHandle, jstring prompt,
+    jint maxTokens, jfloat temperature,
+    jint topK, jfloat topP,
+    jfloat repeatPenalty, jlong seed,
+    jstring stopToken, jlong grammarSamplerHandle,
+    jobject callback)
+{
+    if (nativeHandle == 0 || !callback) return;
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+
+    std::lock_guard<std::mutex> lock(session->mutex);
+
+    jclass callbackClass = env->GetObjectClass(callback);
+    jmethodID onTokenMethod = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
+
+    const char *promptStr = env->GetStringUTFChars(prompt, nullptr);
+    std::string promptText(promptStr);
+    env->ReleaseStringUTFChars(prompt, promptStr);
+
+    std::string stopTokenStr;
+    if (stopToken != nullptr) {
+        const char *stopStr = env->GetStringUTFChars(stopToken, nullptr);
+        stopTokenStr = stopStr;
+        env->ReleaseStringUTFChars(stopToken, stopStr);
+    }
+
+    const llama_vocab *vocab = llama_model_get_vocab(session->model);
+    std::vector<llama_token> tokens = tokenizeHelper(vocab, promptText, true);
+    llama_memory_seq_rm(llama_get_memory(session->ctx), -1, -1, -1);
+    llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
+    llama_decode(session->ctx, batch);
+
+    auto *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(smpl, llama_sampler_init_penalties(
+        64, repeatPenalty, 0.0f, 0.0f));
+    if (temperature > 0.0f) {
+        llama_sampler_chain_add(smpl, llama_sampler_init_temp(temperature));
+        llama_sampler_chain_add(smpl, llama_sampler_init_top_k(topK));
+        llama_sampler_chain_add(smpl, llama_sampler_init_top_p(topP, 1));
+    }
+
+    if (grammarSamplerHandle != 0) {
+        llama_sampler_chain_add(smpl,
+            reinterpret_cast<llama_sampler *>(grammarSamplerHandle));
+    }
+
+    if (temperature > 0.0f) {
+        llama_sampler_chain_add(smpl, llama_sampler_init_dist(seed >= 0 ? seed : (uint32_t)time(nullptr)));
+    } else {
+        llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
+    }
+
+    std::string result;
+    session->lastTokens = tokens;
+
+    for (int i = 0; i < maxTokens; i++) {
+        llama_token newToken = llama_sampler_sample(smpl, session->ctx, -1);
+        if (llama_vocab_is_eog(vocab, newToken)) break;
+
+        std::string piece = tokenToPiece(vocab, newToken);
+        result += piece;
+
+        if (!stopTokenStr.empty() && result.find(stopTokenStr) != std::string::npos) {
+            break;
+        }
+
+        jstring jPiece = env->NewStringUTF(piece.c_str());
+        env->CallVoidMethod(callback, onTokenMethod, jPiece);
+        env->DeleteLocalRef(jPiece);
+
+        batch = llama_batch_get_one(&newToken, 1);
+        llama_decode(session->ctx, batch);
+        session->lastTokens.push_back(newToken);
+    }
+
+    llama_sampler_free(smpl);
+}
+
+/* ──────────────────────────────────────────────────────────────
+ *  Embeddings 嵌入向量
+ *  ────────────────────────────────────────────────────────────── */
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_llama4j_native_1_LlamaContext_embed(
+    JNIEnv *env, jclass clazz, jlong nativeHandle, jstring text)
+{
+    if (nativeHandle == 0 || !text) return env->NewFloatArray(0);
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+
+    const char *textStr = env->GetStringUTFChars(text, nullptr);
+    std::string input(textStr);
+    env->ReleaseStringUTFChars(text, textStr);
+
+    llama_memory_seq_rm(llama_get_memory(session->ctx), -1, -1, -1);
+
+    const llama_vocab *vocab = llama_model_get_vocab(session->model);
+    std::vector<llama_token> tokens = tokenizeHelper(vocab, input, true);
+
+    llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
+    llama_encode(session->ctx, batch);
+
+    const float *embeddings = llama_get_embeddings(session->ctx);
+    if (!embeddings) return env->NewFloatArray(0);
+
+    int nEmbd = llama_model_n_embd(session->model);
+    jfloatArray result = env->NewFloatArray(nEmbd);
+    env->SetFloatArrayRegion(result, 0, nEmbd, embeddings);
+    return result;
+}
+
+/* ──────────────────────────────────────────────────────────────
+ *  模型元数据查询
+ *  ────────────────────────────────────────────────────────────── */
+
+JNIEXPORT jstring JNICALL
+Java_com_llama4j_native_1_LlamaContext_getModelDesc(
+    JNIEnv *env, jclass clazz, jlong nativeHandle)
+{
+    if (nativeHandle == 0) return env->NewStringUTF("");
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+    char buf[256];
+    llama_model_desc(session->model, buf, sizeof(buf));
+    return env->NewStringUTF(buf);
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_llama4j_native_1_LlamaContext_getModelSize(
+    JNIEnv *env, jclass clazz, jlong nativeHandle)
+{
+    if (nativeHandle == 0) return 0;
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+    return static_cast<jlong>(llama_model_size(session->model));
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_llama4j_native_1_LlamaContext_getModelNParams(
+    JNIEnv *env, jclass clazz, jlong nativeHandle)
+{
+    if (nativeHandle == 0) return 0;
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+    return static_cast<jlong>(llama_model_n_params(session->model));
 }

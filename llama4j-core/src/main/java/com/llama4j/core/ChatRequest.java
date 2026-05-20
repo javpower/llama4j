@@ -2,6 +2,7 @@ package com.llama4j.core;
 
 import com.llama4j.chat.Message;
 import com.llama4j.chat.Role;
+import com.llama4j.native_.GrammarConstraint;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -36,6 +37,7 @@ import java.util.Objects;
  * @param topP          Top-P 核采样参数（默认 0.9）
  * @param repeatPenalty 重复惩罚系数（默认 1.1）
  * @param seed          随机种子，-1 为不确定（默认 -1）
+ * @param stopTokens    停止 token 列表，生成这些 token 时立即停止
  */
 public record ChatRequest(
     List<Message> messages,
@@ -44,7 +46,10 @@ public record ChatRequest(
     int topK,
     float topP,
     float repeatPenalty,
-    long seed
+    long seed,
+    List<String> stopTokens,
+    GrammarConstraint grammar,
+    boolean jsonMode
 ) {
 
     /**
@@ -62,7 +67,13 @@ public record ChatRequest(
         if (messages.isEmpty()) {
             throw new IllegalArgumentException("消息列表不能为空");
         }
-        messages = List.copyOf(messages); // 防御性拷贝
+        messages = List.copyOf(messages);
+        if (stopTokens == null) {
+            stopTokens = List.of();
+        }
+        if (grammar != null && grammar.isClosed()) {
+            throw new IllegalArgumentException("GrammarConstraint 已关闭，不能使用");
+        }
     }
 
     /** 创建新的 Builder */
@@ -89,6 +100,9 @@ public record ChatRequest(
         private float topP = 0.9f;
         private float repeatPenalty = 1.1f;
         private long seed = -1L;
+        private List<String> stopTokens = List.of();
+        private GrammarConstraint grammar = null;
+        private boolean jsonMode = false;
 
         private Builder() {}
 
@@ -128,12 +142,16 @@ public record ChatRequest(
         public Builder topP(float topP)                  { this.topP = topP; return this; }
         public Builder repeatPenalty(float repeatPenalty){ this.repeatPenalty = repeatPenalty; return this; }
         public Builder seed(long seed)                   { this.seed = seed; return this; }
+        public Builder stopTokens(List<String> stopTokens) { this.stopTokens = stopTokens != null ? stopTokens : List.of(); return this; }
+        public Builder grammar(GrammarConstraint grammar)  { this.grammar = grammar; return this; }
+        public Builder jsonMode(boolean jsonMode)          { this.jsonMode = jsonMode; return this; }
 
         /** 构建不可变的 ChatRequest 实例 */
         public ChatRequest build() {
             return new ChatRequest(
                 Collections.unmodifiableList(new ArrayList<>(messages)),
-                temperature, maxTokens, topK, topP, repeatPenalty, seed);
+                temperature, maxTokens, topK, topP, repeatPenalty, seed, stopTokens,
+                grammar, jsonMode);
         }
     }
 }

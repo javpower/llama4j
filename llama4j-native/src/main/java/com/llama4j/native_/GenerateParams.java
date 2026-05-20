@@ -4,7 +4,7 @@ package com.llama4j.native_;
  * 文本生成参数 — 不可变配置对象
  *
  * <p>控制模型推理时的采样行为，包括温度、Top-K/Top-P 采样、
- * 重复惩罚和 token 限制。这些参数直接影响生成文本的质量和多样性。</p>
+ * 重复惩罚、token 限制和 grammar 约束。</p>
  *
  * <h2>采样参数详解</h2>
  * <ul>
@@ -18,17 +18,32 @@ package com.llama4j.native_;
  *       1.5+ = 强力惩罚。用于防止模型陷入重复循环。</li>
  *   <li>{@code seed} — 随机种子。-1 表示每次生成结果不同，
  *       固定种子可实现可复现的生成结果。</li>
+ *   <li>{@code stopTokens} — 停止 token 列表。当模型生成这些 token 时立即停止。</li>
+ *   <li>{@code grammar} — Grammar 约束采样器，限制模型输出符合指定语法（如 JSON）。</li>
+ *   <li>{@code jsonMode} — JSON 模式开关。为 true 时自动创建 JSON grammar 约束。</li>
  * </ul>
  *
  * <h2>使用示例</h2>
  * <pre>{@code
+ * // 基本用法
  * GenerateParams params = GenerateParams.builder("讲一个故事")
  *     .maxTokens(1024)
  *     .temperature(0.8f)
- *     .topP(0.95f)
- *     .repeatPenalty(1.15f)
- *     .seed(42L)             // 固定种子，结果可复现
  *     .build();
+ *
+ * // JSON 模式
+ * GenerateParams params = GenerateParams.builder("生成用户信息")
+ *     .jsonMode(true)
+ *     .maxTokens(256)
+ *     .build();
+ *
+ * // 自定义 grammar
+ * try (GrammarConstraint gc = GrammarConstraint.json(ctx)) {
+ *     GenerateParams params = GenerateParams.builder("生成 JSON")
+ *         .grammar(gc)
+ *         .maxTokens(256)
+ *         .build();
+ * }
  * }</pre>
  *
  * @param prompt        输入提示词文本
@@ -38,7 +53,12 @@ package com.llama4j.native_;
  * @param topP          Top-P 核采样阈值，默认 0.9
  * @param repeatPenalty 重复惩罚系数，默认 1.1
  * @param seed          随机种子，-1 = 不确定，默认 -1
+ * @param stopTokens    停止 token 列表
+ * @param grammar       Grammar 约束采样器（可空）
+ * @param jsonMode      JSON 模式开关，默认 false
  */
+import java.util.List;
+
 public record GenerateParams(
     String prompt,
     int maxTokens,
@@ -46,15 +66,12 @@ public record GenerateParams(
     int topK,
     float topP,
     float repeatPenalty,
-    long seed
+    long seed,
+    List<String> stopTokens,
+    GrammarConstraint grammar,
+    boolean jsonMode
 ) {
 
-    /**
-     * 紧凑构造器 — 参数校验
-     *
-     * <p>确保所有采样参数在合理范围内，防止无效参数导致原生层崩溃
-     * 或产生无意义的生成结果。</p>
-     */
     public GenerateParams {
         if (prompt == null || prompt.isBlank()) {
             throw new IllegalArgumentException("提示词 prompt 不能为空或空白");
@@ -74,6 +91,12 @@ public record GenerateParams(
         if (repeatPenalty < 1.0f) {
             throw new IllegalArgumentException("重复惩罚必须 >= 1.0，当前值: " + repeatPenalty);
         }
+        if (stopTokens == null) {
+            stopTokens = List.of();
+        }
+        if (grammar != null && grammar.isClosed()) {
+            throw new IllegalArgumentException("GrammarConstraint 已关闭，不能使用");
+        }
     }
 
     /** 创建一个带有指定提示词的 Builder */
@@ -81,9 +104,6 @@ public record GenerateParams(
         return new Builder(prompt);
     }
 
-    /**
-     * GenerateParams 的流畅构建器
-     */
     public static final class Builder {
         private final String prompt;
         private int maxTokens = 2048;
@@ -92,32 +112,27 @@ public record GenerateParams(
         private float topP = 0.9f;
         private float repeatPenalty = 1.1f;
         private long seed = -1L;
+        private List<String> stopTokens = List.of();
+        private GrammarConstraint grammar = null;
+        private boolean jsonMode = false;
 
         private Builder(String prompt) {
             this.prompt = prompt;
         }
 
-        /** 设置最大生成 token 数 */
         public Builder maxTokens(int maxTokens)         { this.maxTokens = maxTokens; return this; }
-
-        /** 设置采样温度（0 = 贪心，越高越随机） */
         public Builder temperature(float temperature)    { this.temperature = temperature; return this; }
-
-        /** 设置 Top-K 采样参数 */
         public Builder topK(int topK)                    { this.topK = topK; return this; }
-
-        /** 设置 Top-P 核采样阈值 */
         public Builder topP(float topP)                  { this.topP = topP; return this; }
-
-        /** 设置重复惩罚系数（>= 1.0） */
         public Builder repeatPenalty(float repeatPenalty){ this.repeatPenalty = repeatPenalty; return this; }
-
-        /** 设置随机种子（-1 = 不确定） */
         public Builder seed(long seed)                   { this.seed = seed; return this; }
+        public Builder stopTokens(List<String> stopTokens) { this.stopTokens = stopTokens != null ? stopTokens : List.of(); return this; }
+        public Builder grammar(GrammarConstraint grammar){ this.grammar = grammar; return this; }
+        public Builder jsonMode(boolean jsonMode)        { this.jsonMode = jsonMode; return this; }
 
-        /** 构建不可变的 GenerateParams 实例 */
         public GenerateParams build() {
-            return new GenerateParams(prompt, maxTokens, temperature, topK, topP, repeatPenalty, seed);
+            return new GenerateParams(prompt, maxTokens, temperature, topK, topP,
+                repeatPenalty, seed, stopTokens, grammar, jsonMode);
         }
     }
 }
