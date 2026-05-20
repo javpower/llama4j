@@ -1,0 +1,41 @@
+# llama4j Sample Application Configuration
+# ==========================================
+
+server:
+  port: 8080
+
+llama4j:
+  model:
+    # Local model path (preferred)
+    path: ${LLAMA4J_MODEL_PATH:/tmp/llama4j-models/qwen2.5-1.5b-instruct-q4_k_m.gguf}
+    # Or use HuggingFace model ID (will auto-download)
+    # id: unsloth/Qwen2.5-7B-Instruct:Q4_K_M
+    n-ctx: 4096
+    n-gpu-layers: -1
+    n-threads: 8
+
+  inference:
+    temperature: 0.7
+    max-tokens: 2048
+    top-k: 40
+    top-p: 0.9
+    repeat-penalty: 1.1
+
+  server:
+    openai-compatible: true
+    max-concurrent-requests: 4
+
+# Actuator endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.llama4j: DEBUG
+    org.springframework.web: INFO

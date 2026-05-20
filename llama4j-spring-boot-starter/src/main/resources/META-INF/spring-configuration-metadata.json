@@ -1,0 +1,114 @@
+{
+  "groups": [
+    {
+      "name": "llama4j",
+      "type": "com.llama4j.spring.LlamaProperties",
+      "sourceType": "com.llama4j.spring.LlamaProperties",
+      "description": "llama4j 配置属性"
+    },
+    {
+      "name": "llama4j.model",
+      "type": "com.llama4j.spring.LlamaProperties$ModelConfig",
+      "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig",
+      "sourceMethod": "getModel()",
+      "description": "模型加载配置"
+    },
+    {
+      "name": "llama4j.inference",
+      "type": "com.llama4j.spring.LlamaProperties$InferenceConfig",
+      "sourceType": "com.llama4j.spring.LlamaProperties$InferenceConfig",
+      "sourceMethod": "getInference()",
+      "description": "推理默认参数"
+    },
+    {
+      "name": "llama4j.server",
+      "type": "com.llama4j.spring.LlamaProperties$ServerConfig",
+      "sourceType": "com.llama4j.spring.LlamaProperties$ServerConfig",
+      "sourceMethod": "getServer()",
+      "description": "服务器配置"
+    }
+  ],
+  "properties": [
+    {
+      "name": "llama4j.model.path",
+      "type": "java.lang.String",
+      "description": "本地 GGUF 模型文件路径（优先级高于 id）",
+      "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
+    },
+    {
+      "name": "llama4j.model.id",
+      "type": "java.lang.String",
+      "description": "HuggingFace 模型 ID（如 Qwen/Qwen2.5-7B-Instruct-GGUF），自动下载",
+      "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
+    },
+    {
+      "name": "llama4j.model.n-ctx",
+      "type": "java.lang.Integer",
+      "description": "上下文窗口大小（token 数量）",
+      "defaultValue": 4096,
+      "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
+    },
+    {
+      "name": "llama4j.model.n-gpu-layers",
+      "type": "java.lang.Integer",
+      "description": "卸载到 GPU 的层数，-1 表示全部卸载",
+      "defaultValue": -1,
+      "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
+    },
+    {
+      "name": "llama4j.model.n-threads",
+      "type": "java.lang.Integer",
+      "description": "CPU 推理线程数",
+      "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
+    },
+    {
+      "name": "llama4j.inference.temperature",
+      "type": "java.lang.Float",
+      "description": "采样温度（0 = 贪心解码，越高越随机）",
+      "defaultValue": 0.7,
+      "sourceType": "com.llama4j.spring.LlamaProperties$InferenceConfig"
+    },
+    {
+      "name": "llama4j.inference.max-tokens",
+      "type": "java.lang.Integer",
+      "description": "最大生成 token 数",
+      "defaultValue": 2048,
+      "sourceType": "com.llama4j.spring.LlamaProperties$InferenceConfig"
+    },
+    {
+      "name": "llama4j.inference.top-k",
+      "type": "java.lang.Integer",
+      "description": "Top-K 采样参数",
+      "defaultValue": 40,
+      "sourceType": "com.llama4j.spring.LlamaProperties$InferenceConfig"
+    },
+    {
+      "name": "llama4j.inference.top-p",
+      "type": "java.lang.Float",
+      "description": "Top-P 核采样阈值",
+      "defaultValue": 0.9,
+      "sourceType": "com.llama4j.spring.LlamaProperties$InferenceConfig"
+    },
+    {
+      "name": "llama4j.inference.repeat-penalty",
+      "type": "java.lang.Float",
+      "description": "重复惩罚系数（>1.0 抑制重复）",
+      "defaultValue": 1.1,
+      "sourceType": "com.llama4j.spring.LlamaProperties$InferenceConfig"
+    },
+    {
+      "name": "llama4j.server.openai-compatible",
+      "type": "java.lang.Boolean",
+      "description": "是否启用 OpenAI 兼容 API 端点",
+      "defaultValue": true,
+      "sourceType": "com.llama4j.spring.LlamaProperties$ServerConfig"
+    },
+    {
+      "name": "llama4j.server.max-concurrent-requests",
+      "type": "java.lang.Integer",
+      "description": "最大并发推理请求数",
+      "defaultValue": 4,
+      "sourceType": "com.llama4j.spring.LlamaProperties$ServerConfig"
+    }
+  ]
+}
