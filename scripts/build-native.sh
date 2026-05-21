@@ -136,7 +136,7 @@ if [[ "$CLASSIFIER" == macos-* ]]; then
 
     JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 17 2>/dev/null || echo "")}"
 
-    clang++ -shared -fPIC -O2 \
+    clang++ -std=c++17 -shared -fPIC -O2 \
         -I"$JAVA_HOME/include" \
         -I"$JAVA_HOME/include/darwin" \
         -I"$LLAMA_CPP_DIR/include" \
@@ -168,7 +168,7 @@ elif [[ "$CLASSIFIER" == linux-* ]]; then
         LINK_LIBS="$LINK_LIBS -lggml-vulkan -lvulkan"
     fi
 
-    g++ -shared -fPIC -O2 \
+    g++ -std=c++17 -shared -fPIC -O2 \
         -I"$JAVA_HOME/include" \
         -I"$JAVA_HOME/include/linux" \
         -I"$LLAMA_CPP_DIR/include" \
