@@ -118,10 +118,10 @@ load balancing, health checks ×2, latency tax.    Zero DevOps overhead.
                                  ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                         llama4j-repository                                   │
-│  ┌──────────────────────────┐  ┌─────────────────────────────────────────┐  │
-│  │   HuggingFace Hub        │  │  Hardware-aware Quantization Advisor    │  │
-│  │   Model ID → GGUF DL    │  │  VRAM detection → Q4/Q5/Q8 recommend   │  │
-│  └──────────────────────────┘  └─────────────────────────────────────────┘  │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────────────────┐  │
+│  │  ModelScope (魔搭) │ │  HuggingFace Hub  │ │  Quantization Advisor       │  │
+│  │  国内优先下载       │ │  国际回退下载      │ │  VRAM → Q4/Q5/Q8 recommend  │  │
+│  └──────────────────┘ └──────────────────┘ └──────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -147,8 +147,12 @@ load balancing, health checks ×2, latency tax.    Zero DevOps overhead.
 llama4j:
   model:
     path: /models/qwen2.5-7b-q4_k_m.gguf
-    # Or auto-download from HuggingFace:
-    # id: unsloth/Qwen2.5-7B-Instruct:Q4_K_M
+    # Or auto-download (ModelScope first, then HuggingFace):
+    # id: Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M
+    # Or explicitly from ModelScope:
+    # id: modelscope:Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M
+    # Or explicitly from HuggingFace:
+    # id: hf:unsloth/Qwen2.5-7B-Instruct:Q4_K_M
     n-ctx: 4096
     n-gpu-layers: -1    # offload all layers to GPU
     n-threads: 8
@@ -207,6 +211,16 @@ public class WeatherTools {
 
 // LLM automatically invokes tools in a ReAct loop -- no prompt engineering needed
 ```
+
+**Server-side tool execution:** When tools are registered via `@Tool`, the server automatically detects tool calls, executes them, and feeds results back to the model in a ReAct loop. Both sync and streaming (SSE) paths are supported.
+
+**Streaming with tools** produces OpenAI-compatible SSE events:
+
+```
+tool_calls delta (name + arguments) → finish_reason: "tool_calls" → content delta (real-time) → finish_reason: "stop" → [DONE]
+```
+
+The client observes tool calls in the event stream but does not need to execute them.
 
 ### Grammar-Constrained Generation & JSON Mode
 
@@ -285,8 +299,14 @@ Session restored = manager.resumeSession(session.id(), context);
 ```java
 GgufRepository repo = new GgufRepository();
 
-// Auto-download from HuggingFace
-Path model = repo.resolve("unsloth/Qwen2.5-7B-Instruct:Q4_K_M");
+// Auto-download (ModelScope first for China users, then HuggingFace)
+Path model = repo.resolve("Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M");
+
+// Explicitly from ModelScope
+Path msModel = repo.resolve("modelscope:Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M");
+
+// Explicitly from HuggingFace
+Path hfModel = repo.resolve("hf:unsloth/Qwen2.5-7B-Instruct:Q4_K_M");
 
 // Smart quantization recommendation based on available VRAM
 String quant = repo.recommendQuantization(7.0); // 7B model
@@ -304,7 +324,7 @@ String quant = repo.recommendQuantization(7.0); // 7B model
 | **llama4j-chat** | Chat template engine with 10+ formats and Jinja2 parser |
 | **llama4j-tools** | `@Tool` annotation-driven function calling with ReAct loop |
 | **llama4j-metrics** | Micrometer integration with 8 core metrics |
-| **llama4j-repository** | HuggingFace Hub integration + hardware-aware quantization advisor |
+| **llama4j-repository** | ModelScope + HuggingFace integration, hardware-aware quantization advisor |
 | **llama4j-spring-boot-starter** | Auto-configuration, OpenAI API controller, Actuator endpoints |
 | **llama4j-samples** | Example applications |
 
@@ -383,10 +403,20 @@ String prompt = chatService.renderPrompt(messages);
 ### Streaming with SSE
 
 ```java
+// Plain streaming (no tools)
 service.chatStream(request, new ChatStreamListener() {
     @Override public void onToken(String token) { System.out.print(token); }
     @Override public void onComplete(ChatResponse r) { System.out.println("\nDone!"); }
     @Override public void onError(Throwable e) { log.error("Stream failed", e); }
+});
+
+// Streaming with server-side tool execution
+service.chatStreamWithTools(request, new StreamingToolListener() {
+    @Override public void onContentToken(String token) { System.out.print(token); }
+    @Override public void onToolCall(ToolCall call) { log.info("Tool: {}", call.toolName()); }
+    @Override public void onToolResult(ToolResult result) { log.info("Result: {}", result.content()); }
+    @Override public void onComplete(ChatResponse r) { System.out.println("\nDone!"); }
+    @Override public void onError(Throwable e) { log.error("Failed", e); }
 });
 ```
 
@@ -425,9 +455,26 @@ try (LlamaContext ctx = new LlamaContext("/models/qwen2.5-7b.gguf", ModelParams.
 ### Stream via curl
 
 ```bash
+# Plain streaming
 curl -N http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"Write a haiku"}],"stream":true}'
+
+# Streaming with tool calls (tools are auto-detected from server-side @Tool registrations)
+curl -N http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"帮我计算 123 * 456"}],"stream":true}'
+```
+
+Streaming tool call response (OpenAI-compatible format):
+```
+data: {"choices":[{"delta":{"tool_calls":[{"id":"call-xxx","type":"function","function":{"name":"calculate","arguments":"{\"expression\":\"123 * 456\"}"}}]}}]}
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+data: {"choices":[{"delta":{"content":"计算"},"finish_reason":null}]}
+data: {"choices":[{"delta":{"content":"结果"},"finish_reason":null}]}
+...
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+data: [DONE]
 ```
 
 ---

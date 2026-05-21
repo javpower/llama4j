@@ -66,9 +66,28 @@ public record ChatCompletionResponse(
         String model,
         List<ChunkChoice> choices
     ) {
-        /** 创建增量块 */
+        /** 创建内容增量块 */
         public static Chunk delta(String id, String model, String content, String finishReason) {
             var delta = new ChatCompletionRequest.ChatMessage("assistant", content);
+            var choice = new ChunkChoice(0, delta, finishReason);
+            return new Chunk(id, "chat.completion.chunk", System.currentTimeMillis() / 1000, model, List.of(choice));
+        }
+
+        /** 创建工具调用增量块 — 包含 name 和 arguments */
+        public static Chunk toolCallDelta(String id, String model,
+                                          int toolCallIndex, String toolCallId,
+                                          String functionName, String arguments) {
+            var callInfo = new ChatCompletionRequest.ToolCallInfo(
+                toolCallId, "function",
+                new ChatCompletionRequest.FunctionCall(functionName, arguments));
+            var delta = new ChatCompletionRequest.ChatMessage("assistant", null, List.of(callInfo), null);
+            var choice = new ChunkChoice(0, delta, null);
+            return new Chunk(id, "chat.completion.chunk", System.currentTimeMillis() / 1000, model, List.of(choice));
+        }
+
+        /** 创建 finish 块 — 空 delta + finish_reason */
+        public static Chunk finish(String id, String model, String finishReason) {
+            var delta = new ChatCompletionRequest.ChatMessage(null, null, null, null);
             var choice = new ChunkChoice(0, delta, finishReason);
             return new Chunk(id, "chat.completion.chunk", System.currentTimeMillis() / 1000, model, List.of(choice));
         }

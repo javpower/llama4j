@@ -6,6 +6,7 @@ import com.llama4j.core.ChatResponse;
 import com.llama4j.core.ChatStreamListener;
 import com.llama4j.spring.model.ChatCompletionRequest;
 import com.llama4j.spring.model.ChatCompletionResponse;
+import com.llama4j.tools.StreamingToolListener;
 import com.llama4j.tools.ToolEnabledChatService;
 import com.llama4j.tools.ToolRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -72,7 +73,7 @@ public class LlamaEndpoint {
         LOG.debug("收到同步聊天补全请求: {} 条消息", request.messages() != null ? request.messages().size() : 0);
 
         ChatRequest chatRequest = convertRequest(request);
-        boolean hasTools = request.tools() != null && !request.tools().isEmpty();
+        boolean hasTools = toolRegistry.size() > 0;
         ChatResponse chatResponse = hasTools
             ? chatService.chatWithTools(chatRequest)
             : chatService.getChatService().chat(chatRequest);
@@ -107,45 +108,144 @@ public class LlamaEndpoint {
         streamExecutor.execute(() -> {
             try {
                 ChatRequest chatRequest = convertRequest(request);
+                boolean hasTools = toolRegistry.size() > 0;
 
-                chatService.getChatService().chatStream(chatRequest, new ChatStreamListener() {
-                    @Override
-                    public void onToken(String token) {
-                        try {
-                            ChatCompletionResponse.Chunk chunk =
-                                ChatCompletionResponse.Chunk.delta(responseId, request.model(), token, null);
-                            emitter.send(SseEmitter.event()
-                                .data(objectMapper.writeValueAsString(chunk)));
-                        } catch (Exception e) {
-                            emitter.completeWithError(e);
-                        }
-                    }
+                LOG.info("[SSE {}] 流式请求开始: hasTools={}, registeredTools={}, messages={}, model={}",
+                    responseId, hasTools, toolRegistry.size(),
+                    request.messages() != null ? request.messages().size() : 0,
+                    request.model());
 
-                    @Override
-                    public void onComplete(ChatResponse response) {
-                        try {
-                            ChatCompletionResponse.Chunk done =
-                                ChatCompletionResponse.Chunk.delta(responseId, request.model(), "", "stop");
-                            emitter.send(SseEmitter.event()
-                                .data(objectMapper.writeValueAsString(done)));
-                            emitter.send(SseEmitter.event().data("[DONE]"));
-                            emitter.complete();
-                        } catch (Exception e) {
-                            emitter.completeWithError(e);
-                        }
-                    }
-
-                    @Override
-                    public void onError(Throwable error) {
-                        emitter.completeWithError(error);
-                    }
-                });
+                if (hasTools) {
+                    LOG.info("[SSE {}] 服务端已注册 {} 个工具, 走流式工具调用路径",
+                        responseId, toolRegistry.size());
+                    handleStreamWithTools(emitter, responseId, request, chatRequest);
+                } else {
+                    LOG.debug("[SSE {}] 无 tools, 走普通流式路径", responseId);
+                    handleStreamPlain(emitter, responseId, request, chatRequest);
+                }
             } catch (Exception e) {
+                LOG.error("[SSE {}] 流式处理异常: {}", responseId, e.getMessage(), e);
                 emitter.completeWithError(e);
             }
         });
 
         return emitter;
+    }
+
+    /** 无工具的普通流式响应 */
+    private void handleStreamPlain(SseEmitter emitter, String responseId,
+                                   ChatCompletionRequest request, ChatRequest chatRequest) throws Exception {
+        chatService.getChatService().chatStream(chatRequest, new ChatStreamListener() {
+            @Override
+            public void onToken(String token) {
+                try {
+                    sendContentChunk(emitter, responseId, request.model(), token, null);
+                } catch (Exception e) {
+                    emitter.completeWithError(e);
+                }
+            }
+
+            @Override
+            public void onComplete(ChatResponse response) {
+                try {
+                    var stopChunk = ChatCompletionResponse.Chunk.finish(responseId, request.model(), "stop");
+                    emitter.send(SseEmitter.event()
+                        .data(objectMapper.writeValueAsString(stopChunk)));
+                    emitter.send(SseEmitter.event().data("[DONE]"));
+                    LOG.info("[SSE {}] 普通流式完成: tokens={}, latency={}ms",
+                        responseId, response.completionTokens(), response.latencyMs());
+                    emitter.complete();
+                } catch (Exception e) {
+                    emitter.completeWithError(e);
+                }
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                LOG.error("[SSE {}] 普通流式错误: {}", responseId, error.getMessage());
+                emitter.completeWithError(error);
+            }
+        });
+    }
+
+    /** 带工具调用的流式响应 */
+    private void handleStreamWithTools(SseEmitter emitter, String responseId,
+                                       ChatCompletionRequest request, ChatRequest chatRequest) throws Exception {
+        int[] toolCallIndex = {0};
+
+        chatService.chatStreamWithTools(chatRequest, new StreamingToolListener() {
+            @Override
+            public void onContentToken(String token) {
+                try {
+                    sendContentChunk(emitter, responseId, request.model(), token, null);
+                } catch (Exception e) {
+                    emitter.completeWithError(e);
+                }
+            }
+
+            @Override
+            public void onToolCall(com.llama4j.tools.ToolCall toolCall) {
+                try {
+                    int idx = toolCallIndex[0];
+                    LOG.info("[SSE {}] 发送 tool_calls delta: index={}, name={}, arguments={}",
+                        responseId, idx, toolCall.toolName(), toolCall.arguments());
+                    // 工具调用 chunk: 带 name + arguments
+                    var callChunk = ChatCompletionResponse.Chunk.toolCallDelta(
+                        responseId, request.model(),
+                        idx, toolCall.id(), toolCall.toolName(), toolCall.arguments());
+                    emitter.send(SseEmitter.event()
+                        .data(objectMapper.writeValueAsString(callChunk)));
+                } catch (Exception e) {
+                    emitter.completeWithError(e);
+                }
+            }
+
+            @Override
+            public void onToolResult(com.llama4j.tools.ToolResult result) {
+                try {
+                    LOG.info("[SSE {}] 发送 tool_calls finish: success={}, resultLen={}",
+                        responseId, result.success(), result.content().length());
+                    // finish chunk: 空 delta + finish_reason="tool_calls"
+                    var finishChunk = ChatCompletionResponse.Chunk.finish(
+                        responseId, request.model(), "tool_calls");
+                    emitter.send(SseEmitter.event()
+                        .data(objectMapper.writeValueAsString(finishChunk)));
+                    toolCallIndex[0]++;
+                } catch (Exception e) {
+                    emitter.completeWithError(e);
+                }
+            }
+
+            @Override
+            public void onComplete(ChatResponse response) {
+                try {
+                    var stopChunk = ChatCompletionResponse.Chunk.finish(
+                        responseId, request.model(), "stop");
+                    emitter.send(SseEmitter.event()
+                        .data(objectMapper.writeValueAsString(stopChunk)));
+                    emitter.send(SseEmitter.event().data("[DONE]"));
+                    LOG.info("[SSE {}] 流式工具调用完成: tokens={}, latency={}ms",
+                        responseId,
+                        response != null ? response.completionTokens() : -1,
+                        response != null ? response.latencyMs() : -1);
+                    emitter.complete();
+                } catch (Exception e) {
+                    emitter.completeWithError(e);
+                }
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                LOG.error("[SSE {}] 流式工具调用错误: {}", responseId, error.getMessage(), error);
+                emitter.completeWithError(error);
+            }
+        });
+    }
+
+    private void sendContentChunk(SseEmitter emitter, String responseId,
+                                  String model, String content, String finishReason) throws Exception {
+        var chunk = ChatCompletionResponse.Chunk.delta(responseId, model, content, finishReason);
+        emitter.send(SseEmitter.event().data(objectMapper.writeValueAsString(chunk)));
     }
 
     private ChatRequest convertRequest(ChatCompletionRequest request) {

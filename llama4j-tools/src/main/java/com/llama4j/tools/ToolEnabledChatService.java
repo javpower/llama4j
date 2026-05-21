@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -131,6 +132,128 @@ public class ToolEnabledChatService {
 
         LOG.warn("已达到最大工具调用轮次 ({})，返回当前响应", maxToolRounds);
         return response;
+    }
+
+    /**
+     * 带工具调用的流式聊天补全（真正流式）。
+     *
+     * <p>使用 {@code chatStream()} 实时推理，前几个 token 用于判断是否为工具调用。
+     * 如果是自然语言则立即开始实时转发；如果以 { 或 ``` 开头则缓冲到本轮结束。</p>
+     */
+    public void chatStreamWithTools(ChatRequest request, StreamingToolListener listener) {
+        List<Message> conversationHistory = new ArrayList<>(request.messages());
+        LOG.info("[流式ReAct] 开始流式工具调用循环, 对话消息数={}, maxToolRounds={}",
+            conversationHistory.size(), maxToolRounds);
+
+        String toolPrompt = buildToolSystemPrompt();
+        if (!toolPrompt.isEmpty()) {
+            injectToolPrompt(conversationHistory, toolPrompt);
+        }
+
+        ChatResponse[] lastResponse = {null};
+
+        try {
+            for (int round = 0; round < maxToolRounds; round++) {
+                LOG.info("[流式ReAct] === 第 {}/{} 轮推理开始 ===", round + 1, maxToolRounds);
+
+                ChatRequest currentRequest = ChatRequest.builder()
+                    .messages(conversationHistory)
+                    .temperature(request.temperature())
+                    .maxTokens(request.maxTokens())
+                    .topK(request.topK())
+                    .topP(request.topP())
+                    .repeatPenalty(request.repeatPenalty())
+                    .seed(request.seed())
+                    .stopTokens(request.stopTokens())
+                    .build();
+
+                StringBuilder buffer = new StringBuilder();
+                // 0=未决定, 1=实时转发, 2=缓冲（疑似工具调用）
+                int[] decision = {0};
+
+                CompletableFuture<ChatResponse> future =
+                    chatService.chatStream(currentRequest, new ChatStreamListener() {
+                        @Override
+                        public void onToken(String token) {
+                            buffer.append(token);
+
+                            if (decision[0] == 2) return;
+
+                            if (decision[0] == 0 && buffer.length() >= 2) {
+                                String start = buffer.toString().trim();
+                                if (start.startsWith("{") || start.startsWith("```")
+                                    || start.startsWith("tool_call")) {
+                                    decision[0] = 2;
+                                    LOG.debug("[流式ReAct] 前2字符='{}', 判定为疑似工具调用, 切换到缓冲模式", start);
+                                    return;
+                                }
+                                decision[0] = 1;
+                                LOG.debug("[流式ReAct] 前2字符='{}', 判定为自然语言, 切换到实时转发模式", start);
+                                listener.onContentToken(buffer.toString());
+                                return;
+                            }
+
+                            if (decision[0] == 1) {
+                                listener.onContentToken(token);
+                            }
+                        }
+
+                        @Override
+                        public void onComplete(ChatResponse response) {
+                            lastResponse[0] = response;
+                        }
+
+                        @Override
+                        public void onError(Throwable error) {
+                            throw new RuntimeException(error);
+                        }
+                    });
+
+                future.join();
+
+                String fullOutput = buffer.toString();
+                LOG.info("[流式ReAct] 第 {} 轮推理完成, 模型原始输出: {}", round + 1, fullOutput);
+                LOG.info("[流式ReAct] 第 {} 轮推理完成, token数={}, 耗时={}ms",
+                    round + 1, lastResponse[0] != null ? lastResponse[0].completionTokens() : -1,
+                    lastResponse[0] != null ? lastResponse[0].latencyMs() : -1);
+
+                Optional<ToolCall> toolCallOpt = parseToolCall(fullOutput);
+
+                if (toolCallOpt.isEmpty()) {
+                    LOG.info("[流式ReAct] 第 {} 轮未检测到工具调用, 判定为最终回答", round + 1);
+                    if (decision[0] != 1) {
+                        listener.onContentToken(fullOutput);
+                    }
+                    listener.onComplete(lastResponse[0]);
+                    return;
+                }
+
+                ToolCall toolCall = toolCallOpt.get();
+                LOG.info("[流式ReAct] 第 {} 轮检测到工具调用: name={}, arguments={}, id={}",
+                    round + 1, toolCall.toolName(), toolCall.arguments(), toolCall.id());
+                listener.onToolCall(toolCall);
+
+                ToolResult result;
+                try {
+                    result = toolRegistry.execute(toolCall);
+                    LOG.info("[流式ReAct] 工具执行成功: tool={}, result={}", toolCall.toolName(), result.content());
+                } catch (Exception e) {
+                    result = ToolResult.failure(toolCall.id(), "执行错误: " + e.getMessage());
+                    LOG.error("[流式ReAct] 工具执行失败: tool={}, error={}", toolCall.toolName(), e.getMessage());
+                }
+                listener.onToolResult(result);
+
+                conversationHistory.add(Message.assistant(fullOutput));
+                conversationHistory.add(Message.tool(result.content()));
+                LOG.debug("[流式ReAct] 对话历史已更新, 当前消息数={}", conversationHistory.size());
+            }
+
+            LOG.warn("[流式ReAct] 已达到最大工具调用轮次 ({}), 返回当前响应", maxToolRounds);
+            listener.onComplete(lastResponse[0]);
+        } catch (Exception e) {
+            LOG.error("[流式ReAct] 流式工具调用异常: {}", e.getMessage(), e);
+            listener.onError(e);
+        }
     }
 
     /** 获取工具注册中心 */

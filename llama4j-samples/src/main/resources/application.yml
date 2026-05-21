@@ -7,7 +7,7 @@ server:
 llama4j:
   model:
     # Local model path (preferred)
-    path: ${LLAMA4J_MODEL_PATH:/tmp/llama4j-models/qwen2.5-1.5b-instruct-q4_k_m.gguf}
+    path: ${LLAMA4J_MODEL_PATH:/Volumes/macEx/models/qwen2.5-7b-instruct-q4_k_m.gguf}
     # Or use HuggingFace model ID (will auto-download)
     # id: unsloth/Qwen2.5-7B-Instruct:Q4_K_M
     n-ctx: 4096
