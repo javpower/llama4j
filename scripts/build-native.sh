@@ -161,9 +161,12 @@ elif [[ "$CLASSIFIER" == linux-* ]]; then
     cd - > /dev/null
 
     LINK_LIBS="-lllama -lllama-common -lggml -lggml-base -lggml-cpu"
+    EXTRA_LINK_DIRS=""
 
     if [[ "$GPU_BACKEND" == "cuda" ]]; then
         LINK_LIBS="$LINK_LIBS -lggml-cuda -lcublas -lcudart -lculibos"
+        CUDA_LIB_DIR="${CUDA_PATH:-/usr/local/cuda}/lib64"
+        EXTRA_LINK_DIRS="-L$CUDA_LIB_DIR"
     elif [[ "$GPU_BACKEND" == "vulkan" ]]; then
         LINK_LIBS="$LINK_LIBS -lggml-vulkan -lvulkan"
     fi
@@ -176,6 +179,7 @@ elif [[ "$CLASSIFIER" == linux-* ]]; then
         -o "$OUTPUT_DIR/libllama4j.so" \
         "$PROJECT_DIR/llama4j-native/src/main/c++/llama4j.cpp" \
         -L"$LLAMA_CPP_DIR/build/bin" \
+        $EXTRA_LINK_DIRS \
         $LINK_LIBS \
         -Wl,-rpath,'$ORIGIN'
 fi
