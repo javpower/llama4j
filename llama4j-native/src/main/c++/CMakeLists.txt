@@ -48,7 +48,6 @@ if(APPLE)
     target_link_libraries(llama4j PRIVATE
         ${LLAMA_LIB_DIR}/libllama-common.dylib
         ${LLAMA_LIB_DIR}/libllama.dylib
-        ${LLAMA_LIB_DIR}/libmtmd.dylib
         ${LLAMA_LIB_DIR}/libggml.dylib
         ${LLAMA_LIB_DIR}/libggml-base.dylib
         ${LLAMA_LIB_DIR}/libggml-cpu.dylib
@@ -65,7 +64,6 @@ elseif(UNIX)
     target_link_libraries(llama4j PRIVATE
         ${LLAMA_LIB_DIR}/libllama-common.so
         ${LLAMA_LIB_DIR}/libllama.so
-        ${LLAMA_LIB_DIR}/libmtmd.so
         ${LLAMA_LIB_DIR}/libggml.so
         ${LLAMA_LIB_DIR}/libggml-base.so
         ${LLAMA_LIB_DIR}/libggml-cpu.so
@@ -83,7 +81,6 @@ else()
     target_link_libraries(llama4j PRIVATE
         ${LLAMA_LIB_DIR}/llama-common.lib
         ${LLAMA_LIB_DIR}/llama.lib
-        ${LLAMA_LIB_DIR}/mtmd.lib
         ${LLAMA_LIB_DIR}/ggml.lib
         ${LLAMA_LIB_DIR}/ggml-base.lib
         ${LLAMA_LIB_DIR}/ggml-cpu.lib

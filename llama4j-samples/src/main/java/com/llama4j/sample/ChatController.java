@@ -56,28 +56,28 @@ public class ChatController {
 //        return response.content();
 //    }
 
-    @Tool(name = "get_current_time", description = "获取指定时区的当前时间")
-    public String getCurrentTime(
-        @ToolParam(description = "时区 ID，如 'Asia/Shanghai'", type = "string") String timezone
-    ) {
-        return java.time.ZonedDateTime.now(java.time.ZoneId.of(timezone)).toString();
-    }
-
-    @Tool(name = "calculate", description = "执行简单的算术运算")
-    public String calculate(
-        @ToolParam(description = "数学表达式，如 '3 + 5'", type = "string") String expression
-    ) {
-        try {
-            return "计算结果: " + evaluateSimple(expression);
-        } catch (Exception e) {
-            return "计算错误: " + e.getMessage();
-        }
-    }
-
-    @Tool(name = "get_identity", description = "当用户问你是谁、你叫什么名字、介绍自己等身份相关问题时调用此工具")
-    public String getIdentity() {
-        return "我是 Coder建设的专属 AI，请问有什么可以帮助你的";
-    }
+//    @Tool(name = "get_current_time", description = "获取指定时区的当前时间")
+//    public String getCurrentTime(
+//        @ToolParam(description = "时区 ID，如 'Asia/Shanghai'", type = "string") String timezone
+//    ) {
+//        return java.time.ZonedDateTime.now(java.time.ZoneId.of(timezone)).toString();
+//    }
+//
+//    @Tool(name = "calculate", description = "执行简单的算术运算")
+//    public String calculate(
+//        @ToolParam(description = "数学表达式，如 '3 + 5'", type = "string") String expression
+//    ) {
+//        try {
+//            return "计算结果: " + evaluateSimple(expression);
+//        } catch (Exception e) {
+//            return "计算错误: " + e.getMessage();
+//        }
+//    }
+//
+//    @Tool(name = "get_identity", description = "当用户问你是谁、你叫什么名字、介绍自己等身份相关问题时调用此工具")
+//    public String getIdentity() {
+//        return "我是 Coder建设的专属 AI，请问有什么可以帮助你的";
+//    }
 
     private double evaluateSimple(String expr) {
         String[] parts = expr.trim().split("\\s+");

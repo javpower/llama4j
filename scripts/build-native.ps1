@@ -25,7 +25,7 @@ $ProjectDir = Resolve-Path (Join-Path $PSScriptRoot "..")
 
 if ($Jobs -eq 0) { $Jobs = [Environment]::ProcessorCount }
 if ($OutputDir -eq "") {
-    $OutputDir = Join-Path $ProjectDir "llama4j\src\main\resources\native\$Classifier"
+    $OutputDir = Join-Path $ProjectDir "llama4j-native\src\main\resources\native\$Classifier"
 }
 
 Write-Host "=========================================="
@@ -37,12 +37,16 @@ Write-Host " Output:      $OutputDir"
 Write-Host " Jobs:        $Jobs"
 Write-Host "=========================================="
 
-# Step 1: Clone llama.cpp
-if (-not (Test-Path "$LlamaCppDir\CMakeLists.txt")) {
+# Step 1: Clone/update llama.cpp
+if (-not (Test-Path "$LlamaCppDir\.git")) {
     Write-Host "[1/4] Cloning llama.cpp..."
     git clone --depth 1 https://github.com/ggerganov/llama.cpp.git $LlamaCppDir
 } else {
-    Write-Host "[1/4] llama.cpp already exists, skipping clone"
+    Write-Host "[1/4] Updating llama.cpp..."
+    Push-Location $LlamaCppDir
+    git fetch --depth 1 origin master
+    git reset --hard origin/master
+    Pop-Location
 }
 
 # Step 2: Build llama.cpp
@@ -56,7 +60,8 @@ $cmakeArgs = @(
     "-DLLAMA_BUILD_TESTS=OFF",
     "-DLLAMA_BUILD_EXAMPLES=OFF",
     "-DLLAMA_BUILD_TOOLS=OFF",
-    "-DLLAMA_BUILD_SERVER=OFF"
+    "-DLLAMA_BUILD_SERVER=OFF",
+    "-DLLAMA_BUILD_COMMON=ON"
 )
 
 if ($Gpu -eq "cuda") {
@@ -77,7 +82,6 @@ if (-not (Test-Path $binDir)) { $binDir = Join-Path $LlamaCppDir "build\bin" }
 # Copy llama.cpp DLLs
 Copy-Item "$binDir\ggml*.dll" $OutputDir -ErrorAction SilentlyContinue
 Copy-Item "$binDir\llama*.dll" $OutputDir -ErrorAction SilentlyContinue
-Copy-Item "$binDir\mtmd*.dll" $OutputDir -ErrorAction SilentlyContinue
 
 $javaHome = $env:JAVA_HOME
 if (-not $javaHome) { $javaHome = (Get-Command java).Source | Split-Path | Split-Path }

@@ -136,8 +136,9 @@ std::string chatTemplate;
     for (auto key : keys) {
         int tmplLen = llama_model_meta_val_str(model, key, nullptr, 0);
         if (tmplLen > 0) {
+            chatTemplate.resize(tmplLen + 1);
+            llama_model_meta_val_str(model, key, &chatTemplate[0], tmplLen + 1);
             chatTemplate.resize(tmplLen);
-            llama_model_meta_val_str(model, key, chatTemplate.data(), tmplLen + 1);
             break;
         }
     }

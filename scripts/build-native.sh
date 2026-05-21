@@ -60,13 +60,17 @@ echo " 输出目录:  $OUTPUT_DIR"
 echo " 并行数:    $JOBS"
 echo "=========================================="
 
-# ── Step 1: 克隆 llama.cpp ──
+# ── Step 1: 克隆/更新 llama.cpp ──
 if [[ ! -d "$LLAMA_CPP_DIR/.git" ]]; then
     echo "[1/4] 克隆 llama.cpp..."
     git clone --depth 1 --branch "$LLAMA_CPP_VERSION" \
         https://github.com/ggerganov/llama.cpp.git "$LLAMA_CPP_DIR"
 else
-    echo "[1/4] llama.cpp 已存在，跳过克隆"
+    echo "[1/4] 更新 llama.cpp..."
+    cd "$LLAMA_CPP_DIR"
+    git fetch --depth 1 origin "$LLAMA_CPP_VERSION"
+    git reset --hard "origin/$LLAMA_CPP_VERSION"
+    cd - > /dev/null
 fi
 
 # ── Step 2: 编译 llama.cpp ──
@@ -79,6 +83,7 @@ CMAKE_ARGS=(
     -DLLAMA_BUILD_EXAMPLES=OFF
     -DLLAMA_BUILD_TOOLS=OFF
     -DLLAMA_BUILD_SERVER=OFF
+    -DLLAMA_BUILD_COMMON=ON
 )
 
 case "$GPU_BACKEND" in
@@ -121,7 +126,6 @@ mkdir -p "$OUTPUT_DIR"
 if [[ "$CLASSIFIER" == macos-* ]]; then
     cp -L "$LLAMA_CPP_DIR/build/bin/"libggml*.dylib "$OUTPUT_DIR/" 2>/dev/null || true
     cp -L "$LLAMA_CPP_DIR/build/bin/"libllama*.dylib "$OUTPUT_DIR/" 2>/dev/null || true
-    cp -L "$LLAMA_CPP_DIR/build/bin/"libmtmd*.dylib "$OUTPUT_DIR/" 2>/dev/null || true
 
     # 只保留非版本化的库文件名
     cd "$OUTPUT_DIR"
@@ -140,7 +144,7 @@ if [[ "$CLASSIFIER" == macos-* ]]; then
         -o "$OUTPUT_DIR/libllama4j.dylib" \
         "$PROJECT_DIR/llama4j-native/src/main/c++/llama4j.cpp" \
         -L"$LLAMA_CPP_DIR/build/bin" \
-        -lllama -lllama-common -lmtmd \
+        -lllama -lllama-common \
         -lggml -lggml-base -lggml-cpu -lggml-metal \
         -framework Metal -framework Foundation -framework MetalKit \
         -install_name @rpath/libllama4j.dylib
@@ -148,7 +152,6 @@ if [[ "$CLASSIFIER" == macos-* ]]; then
 elif [[ "$CLASSIFIER" == linux-* ]]; then
     cp -L "$LLAMA_CPP_DIR/build/bin/"libggml*.so* "$OUTPUT_DIR/" 2>/dev/null || true
     cp -L "$LLAMA_CPP_DIR/build/bin/"libllama*.so* "$OUTPUT_DIR/" 2>/dev/null || true
-    cp -L "$LLAMA_CPP_DIR/build/bin/"libmtmd*.so* "$OUTPUT_DIR/" 2>/dev/null || true
 
     # 只保留非版本化的库文件名
     cd "$OUTPUT_DIR"
@@ -157,7 +160,7 @@ elif [[ "$CLASSIFIER" == linux-* ]]; then
     done
     cd - > /dev/null
 
-    LINK_LIBS="-lllama -lllama-common -lmtmd -lggml -lggml-base -lggml-cpu"
+    LINK_LIBS="-lllama -lllama-common -lggml -lggml-base -lggml-cpu"
 
     if [[ "$GPU_BACKEND" == "cuda" ]]; then
         LINK_LIBS="$LINK_LIBS -lggml-cuda -lcublas -lcudart -lculibos"

@@ -43,13 +43,11 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: ${{ env.JAVA_DISTRIBUTION }}
 
-      - name: Cache llama.cpp
+      - name: Cache llama.cpp build
         uses: actions/cache@v4
         with:
           path: /tmp/llama.cpp
-          key: llama-cpp-${{ matrix.classifier }}-${{ matrix.gpu_backend }}-${{ github.sha }}
-          restore-keys: |
-            llama-cpp-${{ matrix.classifier }}-${{ matrix.gpu_backend }}-
+          key: llama-cpp-${{ matrix.classifier }}-${{ matrix.gpu_backend }}-master
 
       - name: Setup CUDA Toolkit (Linux/Windows)
         if: matrix.gpu_backend == 'cuda'
