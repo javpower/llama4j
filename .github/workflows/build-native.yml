@@ -1,10 +1,6 @@
 name: Build Native Libraries
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 env:
@@ -96,7 +92,7 @@ jobs:
         with:
           name: native-libs-${{ matrix.classifier }}
           path: llama4j-native/src/main/resources/native/${{ matrix.classifier }}/
-          retention-days: 5
+          retention-days: 1
 
   package-java:
     name: Package Java JAR
@@ -143,4 +139,4 @@ jobs:
         with:
           name: llama4j-complete
           path: llama4j-native/target/*.jar
-          retention-days: 30
+          retention-days: 1
