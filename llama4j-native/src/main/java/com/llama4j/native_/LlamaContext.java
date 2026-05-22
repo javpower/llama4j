@@ -4,6 +4,8 @@ import com.llama4j.exception.ModelNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * JNI 核心桥接类 — llama.cpp 的主要 Java 入口
  *
@@ -52,8 +54,8 @@ public final class LlamaContext implements AutoCloseable {
     /** 原生层 LlamaSession 的不透明指针，0 表示无效 */
     private final long nativeHandle;
 
-    /** 关闭标志，防止重复释放和 use-after-free */
-    private volatile boolean closed = false;
+    /** 关闭标志，原子操作防止并发 double-free */
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     /**
      * 加载模型并创建推理上下文。
@@ -133,6 +135,9 @@ public final class LlamaContext implements AutoCloseable {
 
     /** 获取 KV 缓存中的 token 数量 */
     private static native int getKvCacheTokenCount(long nativeHandle);
+
+    /** 获取上次生成的 token 统计 [promptTokens, completionTokens] */
+    private static native int[] getGenerateStats(long nativeHandle);
 
     /** 使用 llama.cpp 内置引擎渲染对话模板 */
     private static native String applyChatTemplate(long nativeHandle, String[] roles, String[] contents, boolean addAssistant);
@@ -316,6 +321,16 @@ public final class LlamaContext implements AutoCloseable {
         return getKvCacheTokenCount(nativeHandle);
     }
 
+    /**
+     * 获取上次生成的 token 统计。
+     *
+     * @return int[2]: [0]=promptTokens, [1]=completionTokens
+     */
+    public int[] getGenerateStats() {
+        ensureOpen();
+        return getGenerateStats(nativeHandle);
+    }
+
     /* ──────────────────────────────────────────
      *  公开 API — 聊天模板渲染
      *  ────────────────────────────────────────── */
@@ -412,16 +427,15 @@ public final class LlamaContext implements AutoCloseable {
      */
     @Override
     public void close() {
-        if (!closed) {
+        if (closed.compareAndSet(false, true)) {
             LOG.info("正在关闭 LlamaContext (nativeHandle={})", nativeHandle);
             freeModel(nativeHandle);
-            closed = true;
         }
     }
 
     /** @return 上下文是否已关闭 */
     public boolean isClosed() {
-        return closed;
+        return closed.get();
     }
 
     /**
@@ -447,7 +461,7 @@ public final class LlamaContext implements AutoCloseable {
     }
 
     private void ensureOpen() {
-        if (closed) {
+        if (closed.get()) {
             throw new IllegalStateException("LlamaContext 已关闭，不能再使用");
         }
     }
@@ -460,7 +474,7 @@ public final class LlamaContext implements AutoCloseable {
      */
     @Override
     protected void finalize() {
-        if (!closed) {
+        if (!closed.get()) {
             LOG.warn("LlamaContext 未显式关闭 — 在终结器中释放原生资源（请使用 try-with-resources）");
             close();
         }

@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Grammar 约束采样器 — AutoCloseable 封装
@@ -52,8 +53,8 @@ public final class GrammarConstraint implements AutoCloseable {
     /** 拥有此 sampler 的上下文，用于释放资源 */
     private final LlamaContext context;
 
-    /** 关闭标志 */
-    private volatile boolean closed = false;
+    /** 关闭标志，原子操作防止并发 double-free */
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     private GrammarConstraint(LlamaContext context, long grammarHandle) {
         this.context = context;
@@ -100,22 +101,21 @@ public final class GrammarConstraint implements AutoCloseable {
 
     /** @return 是否已关闭 */
     public boolean isClosed() {
-        return closed;
+        return closed.get();
     }
 
     @Override
     public void close() {
-        if (!closed) {
+        if (closed.compareAndSet(false, true)) {
             LOG.debug("释放 GrammarConstraint (handle={})", grammarHandle);
             context.freeGrammar(grammarHandle);
             grammarHandle = 0;
-            closed = true;
         }
     }
 
     @Override
     protected void finalize() {
-        if (!closed) {
+        if (!closed.get()) {
             LOG.warn("GrammarConstraint 未显式关闭 — 在终结器中释放原生资源（请使用 try-with-resources）");
             close();
         }

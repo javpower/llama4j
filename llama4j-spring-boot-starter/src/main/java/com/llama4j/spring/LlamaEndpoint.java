@@ -33,7 +33,8 @@ public class LlamaEndpoint {
     private final LlamaProperties properties;
     private final ObjectMapper objectMapper;
 
-    private final ExecutorService streamExecutor = Executors.newCachedThreadPool(r -> {
+    private final ExecutorService streamExecutor = Executors.newFixedThreadPool(
+        Runtime.getRuntime().availableProcessors() * 2, r -> {
         Thread t = new Thread(r, "llama4j-stream");
         t.setDaemon(true);
         return t;

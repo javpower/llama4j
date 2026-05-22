@@ -140,9 +140,10 @@ public final class ChatService {
         // 步骤 4：后处理 — 清理小模型可能生成的多轮对话幻觉
         result = stripHallucinatedTurns(result);
 
-        // 步骤 5：构建响应
-        int promptTokens = context.tokenize(prompt, true).length;
-        int completionTokens = context.tokenize(result, false).length;
+        // 步骤 5：获取 token 统计（直接从原生层获取，避免重复分词）
+        int[] genStats = context.getGenerateStats();
+        int promptTokens = genStats[0];
+        int completionTokens = genStats[1];
         double tps = latencyMs > 0 ? (double) completionTokens / (latencyMs / 1000.0) : 0.0;
 
         ChatResponse response = ChatResponse.of(result, promptTokens, completionTokens, tps, latencyMs);
@@ -204,8 +205,9 @@ public final class ChatService {
                 // 构建最终响应
                 long latencyMs = System.currentTimeMillis() - startTime;
                 String result = stripHallucinatedTurns(resultBuilder.toString());
-                int promptTokens = context.tokenize(prompt, true).length;
-                int completionTokens = context.tokenize(result, false).length;
+                int[] genStats = context.getGenerateStats();
+                int promptTokens = genStats[0];
+                int completionTokens = genStats[1];
                 double tps = latencyMs > 0 ? (double) completionTokens / (latencyMs / 1000.0) : 0.0;
 
                 ChatResponse response = ChatResponse.of(result, promptTokens, completionTokens, tps, latencyMs);

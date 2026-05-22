@@ -44,6 +44,8 @@ struct LlamaSession {
     std::string   chatTemplate;
     int           nCtx;
     std::mutex    mutex;
+    int           lastPromptTokens = 0;
+    int           lastCompletionTokens = 0;
 
     ~LlamaSession() {
         if (ctx)  llama_free(ctx);
@@ -249,6 +251,7 @@ Java_com_llama4j_native_1_LlamaContext_generate(
 
     std::string result;
     session->lastTokens = tokens;
+    int promptTokenCount = static_cast<int>(tokens.size());
 
     for (int i = 0; i < maxTokens; i++) {
         llama_token newToken = llama_sampler_sample(smpl, session->ctx, -1);
@@ -268,6 +271,9 @@ Java_com_llama4j_native_1_LlamaContext_generate(
         llama_decode(session->ctx, batch);
         session->lastTokens.push_back(newToken);
     }
+
+    session->lastPromptTokens = promptTokenCount;
+    session->lastCompletionTokens = static_cast<int>(session->lastTokens.size()) - promptTokenCount;
 
     llama_sampler_free(smpl);
     return env->NewStringUTF(result.c_str());
@@ -322,6 +328,7 @@ Java_com_llama4j_native_1_LlamaContext_generateStream(
 
     std::string result;
     session->lastTokens = tokens;
+    int promptTokenCount = static_cast<int>(tokens.size());
 
     for (int i = 0; i < maxTokens; i++) {
         llama_token newToken = llama_sampler_sample(smpl, session->ctx, -1);
@@ -342,6 +349,9 @@ Java_com_llama4j_native_1_LlamaContext_generateStream(
         llama_decode(session->ctx, batch);
         session->lastTokens.push_back(newToken);
     }
+
+    session->lastPromptTokens = promptTokenCount;
+    session->lastCompletionTokens = static_cast<int>(session->lastTokens.size()) - promptTokenCount;
 
     llama_sampler_free(smpl);
 }
@@ -561,6 +571,7 @@ Java_com_llama4j_native_1_LlamaContext_generateWithGrammar(
 
     std::string result;
     session->lastTokens = tokens;
+    int promptTokenCount = static_cast<int>(tokens.size());
 
     for (int i = 0; i < maxTokens; i++) {
         llama_token newToken = llama_sampler_sample(smpl, session->ctx, -1);
@@ -580,6 +591,9 @@ Java_com_llama4j_native_1_LlamaContext_generateWithGrammar(
         llama_decode(session->ctx, batch);
         session->lastTokens.push_back(newToken);
     }
+
+    session->lastPromptTokens = promptTokenCount;
+    session->lastCompletionTokens = static_cast<int>(session->lastTokens.size()) - promptTokenCount;
 
     llama_sampler_free(smpl);
     return env->NewStringUTF(result.c_str());
@@ -642,6 +656,7 @@ Java_com_llama4j_native_1_LlamaContext_generateStreamWithGrammar(
 
     std::string result;
     session->lastTokens = tokens;
+    int promptTokenCount = static_cast<int>(tokens.size());
 
     for (int i = 0; i < maxTokens; i++) {
         llama_token newToken = llama_sampler_sample(smpl, session->ctx, -1);
@@ -663,7 +678,30 @@ Java_com_llama4j_native_1_LlamaContext_generateStreamWithGrammar(
         session->lastTokens.push_back(newToken);
     }
 
+    session->lastPromptTokens = promptTokenCount;
+    session->lastCompletionTokens = static_cast<int>(session->lastTokens.size()) - promptTokenCount;
+
     llama_sampler_free(smpl);
+}
+
+/* ──────────────────────────────────────────────────────────────
+ *  生成统计查询
+ *  ────────────────────────────────────────────────────────────── */
+
+JNIEXPORT jintArray JNICALL
+Java_com_llama4j_native_1_LlamaContext_getGenerateStats(
+    JNIEnv *env, jclass clazz, jlong nativeHandle)
+{
+    jintArray result = env->NewIntArray(2);
+    if (nativeHandle == 0) return result;
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+
+    jint stats[2] = {
+        session->lastPromptTokens,
+        session->lastCompletionTokens
+    };
+    env->SetIntArrayRegion(result, 0, 2, stats);
+    return result;
 }
 
 /* ──────────────────────────────────────────────────────────────
