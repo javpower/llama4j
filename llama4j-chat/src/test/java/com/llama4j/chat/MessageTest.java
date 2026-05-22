@@ -91,9 +91,10 @@ class MessageTest {
         }
 
         @Test
-        @DisplayName("content 为 null 时应抛出 NullPointerException")
+        @DisplayName("content 为 null 时应转为空字符串")
         void testNullContent() {
-            assertThrows(NullPointerException.class, () -> new Message(Role.USER, null));
+            Message msg = new Message(Role.USER, null);
+            assertEquals("", msg.content());
         }
     }
 }

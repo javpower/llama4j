@@ -3,7 +3,7 @@ package com.llama4j.tools;
 import com.llama4j.core.ChatResponse;
 
 /**
- * 流式工具调用监听器 — 用于 {@link ToolEnabledChatService#chatStreamWithTools}。
+ * 流式工具调用监听器 — 用于 {@link ReActAgent#callStream}。
  *
  * <p>回调执行在推理线程上，不应阻塞。</p>
  */

@@ -4,25 +4,33 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /**
- * 示例 Spring Boot 应用 — 演示 llama4j 集成
+ * 示例 Spring Boot 应用 — 演示 llama4j 多模型集成
  *
- * <p>启动一个 Spring Boot 服务器，启用 llama4j 自动配置。
- * 暴露 OpenAI 兼容 API 于 {@code /v1/chat/completions}，
- * 可使用任何 OpenAI 客户端库对接。</p>
- *
- * <h2>配置</h2>
- * <p>在 {@code application.yml} 中设置模型路径：</p>
- * <pre>
- * llama4j:
- *   model:
- *     path: /models/qwen2.5-7b-q4_k_m.gguf
- * </pre>
+ * <p>暴露 OpenAI 兼容 API：</p>
+ * <ul>
+ *   <li>{@code POST /v1/chat/completions} — 聊天补全（支持同步和流式）</li>
+ *   <li>{@code GET /v1/models} — 查看已注册的模型列表</li>
+ * </ul>
  *
  * <h2>测试</h2>
  * <pre>
+ * # 使用默认模型
  * curl -X POST http://localhost:8080/v1/chat/completions \
  *   -H "Content-Type: application/json" \
  *   -d '{"messages": [{"role": "user", "content": "你好！"}]}'
+ *
+ * # 指定模型
+ * curl -X POST http://localhost:8080/v1/chat/completions \
+ *   -H "Content-Type: application/json" \
+ *   -d '{"model": "deepseek", "messages": [{"role": "user", "content": "Hello!"}]}'
+ *
+ * # 流式
+ * curl -X POST http://localhost:8080/v1/chat/completions \
+ *   -H "Content-Type: application/json" \
+ *   -d '{"stream": true, "messages": [{"role": "user", "content": "讲个故事"}]}'
+ *
+ * # 查看模型列表
+ * curl http://localhost:8080/v1/models
  * </pre>
  */
 @SpringBootApplication

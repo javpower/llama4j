@@ -1,6 +1,6 @@
 package com.llama4j.sample;
 
-import com.llama4j.tools.ToolEnabledChatService;
+import com.llama4j.tools.ToolRegistry;
 import com.llama4j.tools.annotation.Tool;
 import com.llama4j.tools.annotation.ToolParam;
 import org.slf4j.Logger;
@@ -14,47 +14,9 @@ public class ChatController {
 
     private static final Logger LOG = LoggerFactory.getLogger(ChatController.class);
 
-    private final ToolEnabledChatService chatService;
-
-    public ChatController(ToolEnabledChatService chatService) {
-        this.chatService = chatService;
-        chatService.getToolRegistry().scanAndRegister(this);
+    public ChatController(ToolRegistry toolRegistry) {
+        toolRegistry.scanAndRegister(this);
     }
-
-//    @GetMapping
-//    public String chat(@RequestParam String message) {
-//        LOG.info("收到聊天消息: {}", message);
-//
-//        ChatRequest request = ChatRequest.builder()
-//            .addMessage(Role.USER, message)
-//            .build();
-//
-//        ChatResponse response = chatService.chatWithTools(request);
-//        return response.content();
-//    }
-//
-//    @PostMapping
-//    public String chat(@RequestBody ChatBody body) {
-//        LOG.info("收到聊天请求: {}", body.userMessage());
-//
-//        ChatRequest.Builder builder = ChatRequest.builder();
-//
-//        if (body.messages() != null) {
-//            for (var msg : body.messages()) {
-//                Role role = "user".equals(msg.role()) ? Role.USER : Role.ASSISTANT;
-//                builder.addMessage(role, msg.content());
-//            }
-//        } else if (body.userMessage() != null) {
-//            builder.addMessage(Role.USER, body.userMessage());
-//        }
-//
-//        if (body.temperature() != null) {
-//            builder.temperature(body.temperature());
-//        }
-//
-//        ChatResponse response = chatService.chatWithTools(builder.build());
-//        return response.content();
-//    }
 
     @Tool(name = "get_current_time", description = "获取指定时区的当前时间")
     public String getCurrentTime(
@@ -92,15 +54,4 @@ public class ChatController {
             default -> throw new IllegalArgumentException("未知运算符: " + parts[1]);
         };
     }
-
-    record ChatBody(
-        java.util.List<StreamMessage> messages,
-        String userMessage,
-        Float temperature
-    ) {}
-
-    record StreamMessage(
-        String role,
-        String content
-    ) {}
 }

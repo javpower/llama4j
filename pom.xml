@@ -42,6 +42,7 @@
         <module>llama4j-tools</module>
         <module>llama4j-metrics</module>
         <module>llama4j-repository</module>
+        <module>llama4j-providers</module>
         <module>llama4j-spring-boot-starter</module>
         <module>llama4j-samples</module>
     </modules>
@@ -97,8 +98,11 @@
                 <artifactId>llama4j-repository</artifactId>
                 <version>${project.version}</version>
             </dependency>
-
-            <!-- Spring Boot BOM -->
+            <dependency>
+                <groupId>com.llama4j</groupId>
+                <artifactId>llama4j-providers</artifactId>
+                <version>${project.version}</version>
+            </dependency>
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>

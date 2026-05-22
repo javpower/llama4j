@@ -43,6 +43,7 @@ struct LlamaSession {
     std::vector<llama_token> lastTokens;
     std::string   chatTemplate;
     int           nCtx;
+    int           nBatch;
     std::mutex    mutex;
     int           lastPromptTokens = 0;
     int           lastCompletionTokens = 0;
@@ -90,6 +91,35 @@ static std::vector<llama_token> tokenizeHelper(
     }
     tokens.resize(nTokens);
     return tokens;
+}
+
+/**
+ * 分批将 prompt tokens 送入 llama_decode。
+ *
+ * 当 token 数量超过 n_batch 时，自动按 n_batch 大小切分，
+ * 避免触发 n_tokens_all <= cparams.n_batch 断言。
+ */
+static void decodePromptInBatches(llama_context *ctx,
+                                   llama_token *tokens, int nTokens,
+                                   int nBatch) {
+    for (int i = 0; i < nTokens; i += nBatch) {
+        int batchSize = std::min(nBatch, nTokens - i);
+        llama_batch batch = llama_batch_get_one(tokens + i, batchSize);
+        llama_decode(ctx, batch);
+    }
+}
+
+/**
+ * 分批将 prompt tokens 送入 llama_encode（用于 embeddings）。
+ */
+static void encodeInBatches(llama_context *ctx,
+                             llama_token *tokens, int nTokens,
+                             int nBatch) {
+    for (int i = 0; i < nTokens; i += nBatch) {
+        int batchSize = std::min(nBatch, nTokens - i);
+        llama_batch batch = llama_batch_get_one(tokens + i, batchSize);
+        llama_encode(ctx, batch);
+    }
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -150,6 +180,7 @@ std::string chatTemplate;
     session->ctx = ctx;
     session->chatTemplate = chatTemplate;
     session->nCtx = nCtx;
+    session->nBatch = ctxParams.n_batch;
 
     return reinterpret_cast<jlong>(session);
 }
@@ -234,8 +265,8 @@ Java_com_llama4j_native_1_LlamaContext_generate(
     std::vector<llama_token> tokens = tokenizeHelper(vocab, promptText, true);
 
     llama_memory_seq_rm(llama_get_memory(session->ctx), -1, -1, -1);
-    llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
-    llama_decode(session->ctx, batch);
+    decodePromptInBatches(session->ctx, tokens.data(), static_cast<int>(tokens.size()), session->nBatch);
+    llama_batch batch;
 
     auto *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
     llama_sampler_chain_add(smpl, llama_sampler_init_penalties(
@@ -311,8 +342,8 @@ Java_com_llama4j_native_1_LlamaContext_generateStream(
     const llama_vocab *vocab = llama_model_get_vocab(session->model);
     std::vector<llama_token> tokens = tokenizeHelper(vocab, promptText, true);
     llama_memory_seq_rm(llama_get_memory(session->ctx), -1, -1, -1);
-    llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
-    llama_decode(session->ctx, batch);
+    decodePromptInBatches(session->ctx, tokens.data(), static_cast<int>(tokens.size()), session->nBatch);
+    llama_batch batch;
 
     auto *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
     llama_sampler_chain_add(smpl, llama_sampler_init_penalties(
@@ -545,8 +576,8 @@ Java_com_llama4j_native_1_LlamaContext_generateWithGrammar(
     std::vector<llama_token> tokens = tokenizeHelper(vocab, promptText, true);
 
     llama_memory_seq_rm(llama_get_memory(session->ctx), -1, -1, -1);
-    llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
-    llama_decode(session->ctx, batch);
+    decodePromptInBatches(session->ctx, tokens.data(), static_cast<int>(tokens.size()), session->nBatch);
+    llama_batch batch;
 
     auto *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
     llama_sampler_chain_add(smpl, llama_sampler_init_penalties(
@@ -631,8 +662,8 @@ Java_com_llama4j_native_1_LlamaContext_generateStreamWithGrammar(
     const llama_vocab *vocab = llama_model_get_vocab(session->model);
     std::vector<llama_token> tokens = tokenizeHelper(vocab, promptText, true);
     llama_memory_seq_rm(llama_get_memory(session->ctx), -1, -1, -1);
-    llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
-    llama_decode(session->ctx, batch);
+    decodePromptInBatches(session->ctx, tokens.data(), static_cast<int>(tokens.size()), session->nBatch);
+    llama_batch batch;
 
     auto *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
     llama_sampler_chain_add(smpl, llama_sampler_init_penalties(
@@ -724,8 +755,7 @@ Java_com_llama4j_native_1_LlamaContext_embed(
     const llama_vocab *vocab = llama_model_get_vocab(session->model);
     std::vector<llama_token> tokens = tokenizeHelper(vocab, input, true);
 
-    llama_batch batch = llama_batch_get_one(tokens.data(), tokens.size());
-    llama_encode(session->ctx, batch);
+    encodeInBatches(session->ctx, tokens.data(), static_cast<int>(tokens.size()), session->nBatch);
 
     const float *embeddings = llama_get_embeddings(session->ctx);
     if (!embeddings) return env->NewFloatArray(0);

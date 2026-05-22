@@ -1,53 +1,57 @@
 package com.llama4j.chat;
 
+import com.llama4j.chat.content.ContentBlock;
+import com.llama4j.chat.content.TextBlock;
+import com.llama4j.chat.content.ToolUseBlock;
+import com.llama4j.chat.content.ToolResultBlock;
+
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * 单条聊天消息 — 不可变对象
  *
- * <p>每条消息由 {@link Role}（角色）和文本内容组成。消息是对话模板系统
- * 的基本单元——它们被组装成列表，然后通过 {@link com.llama4j.chat.ChatFormat}
- * 渲染为模型可理解的最终提示词字符串。</p>
+ * <p>每条消息由 {@link Role} 和内容组成。支持纯文本和 {@link ContentBlock} 列表两种表示。</p>
  *
- * <h2>消息在渲染管线中的位置</h2>
- * <pre>
- * List&lt;Message&gt; → ChatFormat.render() → 提示词字符串 → 分词 → 推理
- * </pre>
- *
- * <h2>使用示例</h2>
- * <pre>{@code
- * Message sys = Message.system("你是一个有帮助的AI助手。");
- * Message usr = Message.user("什么是量子计算？");
- * Message ast = Message.assistant("量子计算是利用量子力学原理...");
- * }</pre>
- *
- * @param role    消息发送者的角色
- * @param content 消息的文本内容
+ * @param role    消息角色
+ * @param content 文本内容
+ * @param blocks  多态内容块列表
  */
-public record Message(Role role, String content) {
+public record Message(Role role, String content, List<ContentBlock> blocks) {
 
     public Message {
-        Objects.requireNonNull(role, "角色不能为 null");
-        Objects.requireNonNull(content, "内容不能为 null");
+        Objects.requireNonNull(role, "role 不能为 null");
+        if (content == null) content = "";
+        blocks = blocks != null ? Collections.unmodifiableList(blocks) : List.of();
     }
 
-    /** 便捷工厂方法：创建系统消息 */
-    public static Message system(String content) {
-        return new Message(Role.SYSTEM, content);
+    /** 纯文本消息 */
+    public Message(Role role, String content) {
+        this(role, content, content != null ? List.of(new TextBlock(content)) : List.of());
     }
 
-    /** 便捷工厂方法：创建用户消息 */
-    public static Message user(String content) {
-        return new Message(Role.USER, content);
+    /** 多态内容消息 */
+    public static Message of(Role role, List<ContentBlock> blocks) {
+        Objects.requireNonNull(blocks, "blocks 不能为 null");
+        String text = blocks.stream()
+            .filter(b -> b instanceof TextBlock)
+            .map(b -> ((TextBlock) b).text())
+            .collect(Collectors.joining("\n"));
+        return new Message(role, text, blocks);
     }
 
-    /** 便捷工厂方法：创建助手消息 */
-    public static Message assistant(String content) {
-        return new Message(Role.ASSISTANT, content);
+    public static Message system(String content) { return new Message(Role.SYSTEM, content); }
+    public static Message user(String content) { return new Message(Role.USER, content); }
+    public static Message assistant(String content) { return new Message(Role.ASSISTANT, content); }
+    public static Message tool(String content) { return new Message(Role.TOOL, content); }
+
+    public boolean hasToolUse() {
+        return blocks.stream().anyMatch(b -> b instanceof ToolUseBlock);
     }
 
-    /** 便捷工厂方法：创建工具结果消息 */
-    public static Message tool(String content) {
-        return new Message(Role.TOOL, content);
+    public boolean hasToolResult() {
+        return blocks.stream().anyMatch(b -> b instanceof ToolResultBlock);
     }
 }

@@ -5,18 +5,35 @@ server:
   port: 8080
 
 llama4j:
-  model:
-    # Local model path (preferred)
-    path: ${LLAMA4J_MODEL_PATH:/Volumes/macEx/models/qwen2.5-7b-instruct-q4_k_m.gguf}
-    # Or auto-download (ModelScope first, then HuggingFace):
-    # id: Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M
-    # Or explicitly from ModelScope:
-    # id: modelscope:Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M
-    # Or explicitly from HuggingFace:
-    # id: hf:unsloth/Qwen2.5-7B-Instruct:Q4_K_M
-    n-ctx: 4096
-    n-gpu-layers: -1
-    n-threads: 8
+  # 默认模型名称
+  default-model: qwen-local
+
+  # API 安全校验（不配或留空则不校验）
+  # api:
+  #   key: your-secret-key
+
+  # 多模型配置
+  models:
+    # 本地模型
+    - name: qwen-local
+      type: local
+      path: ${LLAMA4J_MODEL_PATH:/Volumes/macEx/models/qwen2.5-7b-instruct-q4_k_m.gguf}
+      n-ctx: 4096
+      n-gpu-layers: -1
+      n-threads: 8
+
+    # OpenAI 兼容云端模型（取消注释即可使用）
+    # - name: deepseek
+    #   type: openai
+    #   api-key: ${DEEPSEEK_API_KEY:sk-xxx}
+    #   base-url: https://api.deepseek.com
+    #   model-name: deepseek-chat
+
+    # - name: gpt4o
+    #   type: openai
+    #   api-key: ${OPENAI_API_KEY:sk-xxx}
+    #   base-url: https://api.openai.com
+    #   model-name: gpt-4o
 
   inference:
     temperature: 0.7
@@ -24,10 +41,6 @@ llama4j:
     top-k: 40
     top-p: 0.9
     repeat-penalty: 1.1
-
-  server:
-    openai-compatible: true
-    max-concurrent-requests: 4
 
 # Actuator endpoints
 management:

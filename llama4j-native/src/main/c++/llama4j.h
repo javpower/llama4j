@@ -271,6 +271,15 @@ JNIEXPORT jint JNICALL
 Java_com_llama4j_native_1_LlamaContext_getKvCacheTokenCount(
     JNIEnv *env, jclass clazz, jlong nativeHandle);
 
+/**
+ * 获取上次生成的 token 统计。
+ *
+ * @return int[2]: [0]=promptTokens, [1]=completionTokens
+ */
+JNIEXPORT jintArray JNICALL
+Java_com_llama4j_native_1_LlamaContext_getGenerateStats(
+    JNIEnv *env, jclass clazz, jlong nativeHandle);
+
 /* ──────────────────────────────────────────────────────────────
  *  聊天模板渲染
  *  ────────────────────────────────────────────────────────────── */

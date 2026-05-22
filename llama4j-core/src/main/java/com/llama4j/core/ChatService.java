@@ -296,9 +296,10 @@ public final class ChatService {
      *  生命周期
      *  ────────────────────────────────────────── */
 
-    /** 关闭流式执行器，释放资源 */
+    /** 关闭流式执行器和推理上下文，释放原生资源 */
     public void shutdown() {
         streamExecutor.shutdownNow();
+        context.close();
         LOG.info("ChatService 已关闭");
     }
 
