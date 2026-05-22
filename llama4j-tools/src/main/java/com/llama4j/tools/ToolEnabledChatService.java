@@ -94,6 +94,7 @@ public class ToolEnabledChatService {
         }
 
         ChatResponse response = null;
+        Set<String> executedToolKeys = new HashSet<>();
 
         for (int round = 0; round < maxToolRounds; round++) {
             ChatRequest currentRequest = ChatRequest.builder()
@@ -115,6 +116,13 @@ public class ToolEnabledChatService {
             }
 
             ToolCall toolCall = toolCallOpt.get();
+            String toolKey = toolCall.toolName() + ":" + toolCall.arguments();
+
+            if (executedToolKeys.contains(toolKey)) {
+                LOG.warn("检测到重复工具调用: {}, 返回当前响应", toolKey);
+                return response;
+            }
+
             LOG.info("检测到工具调用: {} (第 {}/{} 轮)", toolCall.toolName(), round + 1, maxToolRounds);
 
             ToolResult result;
@@ -126,8 +134,9 @@ public class ToolEnabledChatService {
                 LOG.error("工具执行失败: {}", e.getMessage());
             }
 
-            conversationHistory.add(Message.assistant(response.content()));
+            conversationHistory.add(Message.assistant("[调用工具: " + toolCall.toolName() + "(" + toolCall.arguments() + ")]"));
             conversationHistory.add(Message.tool(result.content()));
+            executedToolKeys.add(toolKey);
         }
 
         LOG.warn("已达到最大工具调用轮次 ({})，返回当前响应", maxToolRounds);
@@ -151,6 +160,9 @@ public class ToolEnabledChatService {
         }
 
         ChatResponse[] lastResponse = {null};
+
+        // 记录已执行的工具调用，用于防重复
+        Set<String> executedToolKeys = new HashSet<>();
 
         try {
             for (int round = 0; round < maxToolRounds; round++) {
@@ -229,6 +241,16 @@ public class ToolEnabledChatService {
                 }
 
                 ToolCall toolCall = toolCallOpt.get();
+                String toolKey = toolCall.toolName() + ":" + toolCall.arguments();
+
+                // 防重复：同一工具+同一参数已执行过，强制转为自然语言回答
+                if (executedToolKeys.contains(toolKey)) {
+                    LOG.warn("[流式ReAct] 检测到重复工具调用: {}, 强制结束循环，将模型输出当作最终回答", toolKey);
+                    listener.onContentToken(fullOutput);
+                    listener.onComplete(lastResponse[0]);
+                    return;
+                }
+
                 LOG.info("[流式ReAct] 第 {} 轮检测到工具调用: name={}, arguments={}, id={}",
                     round + 1, toolCall.toolName(), toolCall.arguments(), toolCall.id());
                 listener.onToolCall(toolCall);
@@ -242,8 +264,9 @@ public class ToolEnabledChatService {
                     LOG.error("[流式ReAct] 工具执行失败: tool={}, error={}", toolCall.toolName(), e.getMessage());
                 }
                 listener.onToolResult(result);
+                executedToolKeys.add(toolKey);
 
-                conversationHistory.add(Message.assistant(fullOutput));
+                conversationHistory.add(Message.assistant("[调用工具: " + toolCall.toolName() + "(" + toolCall.arguments() + ")]"));
                 conversationHistory.add(Message.tool(result.content()));
                 LOG.debug("[流式ReAct] 对话历史已更新, 当前消息数={}", conversationHistory.size());
             }
@@ -323,8 +346,12 @@ public class ToolEnabledChatService {
             sb.append("\n```\n\n");
         }
 
-        sb.append("# 注意\n");
-        sb.append("- 只有在需要使用工具时才输出JSON格式\n");
+        sb.append("# 工作流程（严格遵守）\n");
+        sb.append("1. 分析用户问题，判断是否需要使用工具\n");
+        sb.append("2. 如果需要工具，输出JSON格式调用（一轮只调用一个工具）\n");
+        sb.append("3. 收到工具返回结果后，必须用自然语言总结回答用户，不要再输出JSON\n");
+        sb.append("4. 绝对不要重复调用同一工具\n");
+        sb.append("- 如果对话历史中已有该工具的结果，直接基于结果回答\n");
         sb.append("- 不需要工具时，直接用自然语言回答\n");
 
         return sb.toString();

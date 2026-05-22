@@ -5,7 +5,19 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ── 查找 JNI ──
-find_package(JNI REQUIRED)
+if(DEFINED JAVA_HOME AND EXISTS "${JAVA_HOME}/include")
+    set(JNI_INCLUDE_DIRS "${JAVA_HOME}/include")
+    if(WIN32)
+        list(APPEND JNI_INCLUDE_DIRS "${JAVA_HOME}/include/win32")
+    elseif(APPLE)
+        list(APPEND JNI_INCLUDE_DIRS "${JAVA_HOME}/include/darwin")
+    else()
+        list(APPEND JNI_INCLUDE_DIRS "${JAVA_HOME}/include/linux")
+    endif()
+    message(STATUS "JNI include dirs (from JAVA_HOME): ${JNI_INCLUDE_DIRS}")
+else()
+    find_package(JNI REQUIRED)
+endif()
 
 # ── 查找 llama.cpp（从 LLAMA_CPP_ROOT 或默认路径）──
 if(NOT LLAMA_CPP_ROOT)

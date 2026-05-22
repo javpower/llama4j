@@ -86,6 +86,10 @@ Copy-Item "$binDir\llama*.dll" $OutputDir -ErrorAction SilentlyContinue
 $javaHome = $env:JAVA_HOME
 if (-not $javaHome) { $javaHome = (Get-Command java).Source | Split-Path | Split-Path }
 
+# Ensure JAVA_HOME env var is set (CMake FindJNI and our CMakeLists.txt both use it)
+$env:JAVA_HOME = $javaHome
+Write-Host "JAVA_HOME: $javaHome"
+
 # Use CMake to build JNI bridge
 $jniBuildDir = Join-Path $ProjectDir "llama4j-native\src\main\c++\build"
 New-Item -ItemType Directory -Force -Path $jniBuildDir | Out-Null
@@ -93,8 +97,10 @@ New-Item -ItemType Directory -Force -Path $jniBuildDir | Out-Null
 & cmake -B $jniBuildDir -S "$ProjectDir\llama4j-native\src\main\c++" `
     "-DLLAMA_CPP_ROOT=$LlamaCppDir" `
     "-DJAVA_HOME=$javaHome"
+if ($LASTEXITCODE -ne 0) { throw "CMake configure failed with exit code $LASTEXITCODE" }
 
 & cmake --build $jniBuildDir --config Release
+if ($LASTEXITCODE -ne 0) { throw "CMake build failed with exit code $LASTEXITCODE" }
 
 # Copy JNI bridge DLL
 Copy-Item "$jniBuildDir\Release\llama4j.dll" $OutputDir -ErrorAction SilentlyContinue
