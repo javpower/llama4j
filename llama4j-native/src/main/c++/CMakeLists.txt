@@ -39,7 +39,11 @@ if(APPLE)
 elseif(UNIX)
     set(LLAMA_LIB_DIR "${LLAMA_CPP_ROOT}/build/bin")
 else()
-    set(LLAMA_LIB_DIR "${LLAMA_CPP_ROOT}/build/bin/Release")
+    # Windows MSVC: DLLs in build/bin/Release, import .lib in build/lib/Release
+    set(LLAMA_LIB_DIR "${LLAMA_CPP_ROOT}/build/lib/Release")
+    if(NOT EXISTS "${LLAMA_LIB_DIR}")
+        set(LLAMA_LIB_DIR "${LLAMA_CPP_ROOT}/build/bin/Release")
+    endif()
 endif()
 
 # 源文件
