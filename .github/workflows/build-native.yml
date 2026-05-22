@@ -2,6 +2,27 @@ name: Build Native Libraries
 
 on:
   workflow_dispatch:
+    inputs:
+      build_macos_aarch64:
+        description: "Build macOS ARM64"
+        type: boolean
+        default: true
+      build_macos_x86_64:
+        description: "Build macOS x86_64"
+        type: boolean
+        default: true
+      build_linux_x86_64:
+        description: "Build Linux x86_64"
+        type: boolean
+        default: true
+      build_windows_x86_64:
+        description: "Build Windows x86_64"
+        type: boolean
+        default: true
+      package_java:
+        description: "Package final JAR (requires all selected builds to succeed)"
+        type: boolean
+        default: false
 
 env:
   LLAMA_CPP_VERSION: "master"
@@ -11,6 +32,7 @@ env:
 jobs:
   build-native:
     name: ${{ matrix.classifier }} (${{ matrix.gpu_backend }})
+    if: ${{ matrix.enabled }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -19,15 +41,19 @@ jobs:
           - runner: macos-14
             classifier: macos-aarch64
             gpu_backend: metal
+            enabled: ${{ inputs.build_macos_aarch64 }}
           - runner: macos-13
             classifier: macos-x86_64
             gpu_backend: metal
+            enabled: ${{ inputs.build_macos_x86_64 }}
           - runner: ubuntu-22.04
             classifier: linux-x86_64
             gpu_backend: cuda
+            enabled: ${{ inputs.build_linux_x86_64 }}
           - runner: windows-2022
             classifier: windows-x86_64
             gpu_backend: cuda
+            enabled: ${{ inputs.build_windows_x86_64 }}
 
     steps:
       - name: Checkout llama4j
@@ -96,6 +122,7 @@ jobs:
 
   package-java:
     name: Package Java JAR
+    if: ${{ inputs.package_java }}
     needs: build-native
     runs-on: ubuntu-22.04
     steps:
