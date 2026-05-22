@@ -84,7 +84,9 @@ public final class InferenceStats {
     /** 计算平均 token/秒吞吐量 */
     public double getAvgTokensPerSecond() {
         long count = totalInferences.get();
-        return count > 0 ? (double) totalCompletionTokens.get() / (totalLatencyMs.sum() / 1000.0) : 0.0;
+        if (count == 0) return 0.0;
+        double latencySeconds = totalLatencyMs.sum() / 1000.0;
+        return latencySeconds > 0.0 ? (double) totalCompletionTokens.get() / latencySeconds : 0.0;
     }
 
     @Override

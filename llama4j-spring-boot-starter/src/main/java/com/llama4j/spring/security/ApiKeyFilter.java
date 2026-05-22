@@ -9,6 +9,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 /**
  * API Key 安全校验过滤器 — Bearer Token 认证
@@ -50,7 +52,7 @@ public class ApiKeyFilter extends OncePerRequestFilter {
         }
 
         String token = authHeader.substring(7).trim();
-        if (!apiKey.equals(token)) {
+        if (!constantTimeEquals(apiKey, token)) {
             LOG.warn("API Key 验证失败: {} {}", request.getMethod(), path);
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType("application/json");
@@ -66,5 +68,9 @@ public class ApiKeyFilter extends OncePerRequestFilter {
      */
     public static boolean isEnabled(String apiKey) {
         return apiKey != null && !apiKey.isBlank();
+    }
+
+    private static boolean constantTimeEquals(String a, String b) {
+        return MessageDigest.isEqual(a.getBytes(), b.getBytes());
     }
 }

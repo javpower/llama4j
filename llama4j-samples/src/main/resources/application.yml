@@ -21,6 +21,11 @@ llama4j:
       n-ctx: 4096
       n-gpu-layers: -1
       n-threads: 8
+#    - name: deepseek
+#      type: openai
+#      api-key: ${LLAMA4J_API_KEY:your-api-key-here}
+#      base-url: https://api.minimaxi.com/v1
+#      model-name: MiniMax-M2.7
 
     # OpenAI 兼容云端模型（取消注释即可使用）
     # - name: deepseek

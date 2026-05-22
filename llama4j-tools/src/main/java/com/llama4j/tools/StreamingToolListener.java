@@ -23,4 +23,7 @@ public interface StreamingToolListener {
 
     /** 出错 */
     void onError(Throwable error);
+
+    /** 模型正在思考（缓冲阶段的心跳通知） */
+    default void onThinking(String partialContent) {}
 }

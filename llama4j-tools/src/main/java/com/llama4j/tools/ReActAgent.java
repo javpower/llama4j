@@ -7,6 +7,7 @@ import com.llama4j.core.hook.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -104,8 +105,9 @@ public class ReActAgent {
             // PostReasoning hook
             notifyHooks(new PostReasoningEvent(round, response));
 
-            // 解析工具调用 — 支持多个
-            List<ToolCall> toolCalls = parseToolCalls(response.content());
+            // 解析工具调用 — 支持多个（先去除 <think> 块）
+            String strippedContent = stripThinkBlocks(response.content());
+            List<ToolCall> toolCalls = parseToolCalls(strippedContent);
             if (toolCalls.isEmpty()) {
                 LOG.debug("第 {} 轮无工具调用，返回最终响应", round + 1);
                 return response;
@@ -145,16 +147,17 @@ public class ReActAgent {
                 })
                 .toList()));
 
-            // 更新对话历史
+            // 更新对话历史 — content 保留纯文本（本地模型用），tool_calls 供云端 API 用
             String callSummary = toolCalls.stream()
                 .map(tc -> tc.toolName() + "(" + tc.arguments() + ")")
                 .collect(Collectors.joining(", "));
-            history.add(Message.assistant("[调用工具: " + callSummary + "]"));
-
-            String resultSummary = results.stream()
-                .map(r -> r.content())
-                .collect(Collectors.joining("\n"));
-            history.add(Message.tool(resultSummary));
+            List<Map<String, Object>> tcList = toolCalls.stream()
+                .map(tc -> Map.<String, Object>of("id", tc.id(), "name", tc.toolName(), "arguments", tc.arguments()))
+                .toList();
+            history.add(Message.assistantWithToolCalls("[调用工具: " + callSummary + "]", tcList));
+            for (int i = 0; i < toolCalls.size(); i++) {
+                history.add(Message.toolResult(results.get(i).content(), toolCalls.get(i).id()));
+            }
         }
 
         LOG.warn("已达到最大迭代次数 ({})，返回当前响应", maxIterations);
@@ -179,6 +182,7 @@ public class ReActAgent {
 
         ChatResponse[] lastResponse = {null};
         Set<String> executedKeys = new HashSet<>();
+        boolean[] errorHandled = {false};
 
         try {
             for (int round = 0; round < maxIterations; round++) {
@@ -191,19 +195,30 @@ public class ReActAgent {
 
                 StringBuilder buffer = new StringBuilder();
                 int[] decision = {0}; // 0=未决定, 1=实时转发, 2=缓冲
+                long[] lastThinkHeartbeat = {0};
 
                 CompletableFuture<ChatResponse> future =
                     model.chatStream(currentRequest, new ChatStreamListener() {
                         @Override
                         public void onToken(String token) {
                             buffer.append(token);
-                            if (decision[0] == 2) return;
+                            if (decision[0] == 2) {
+                                // Send thinking heartbeat every 2 seconds
+                                long now = System.currentTimeMillis();
+                                if (now - lastThinkHeartbeat[0] > 2000) {
+                                    lastThinkHeartbeat[0] = now;
+                                    listener.onThinking(buffer.toString());
+                                }
+                                return;
+                            }
 
                             if (decision[0] == 0 && buffer.length() >= 2) {
                                 String start = buffer.toString().trim();
                                 if (start.startsWith("[") || start.startsWith("{")
-                                    || start.startsWith("```") || start.startsWith("tool_call")) {
+                                    || start.startsWith("```") || startsWithThink(start)
+                                    || start.startsWith("tool_call")) {
                                     decision[0] = 2;
+                                    lastThinkHeartbeat[0] = System.currentTimeMillis();
                                     return;
                                 }
                                 decision[0] = 1;
@@ -222,6 +237,7 @@ public class ReActAgent {
 
                         @Override
                         public void onError(Throwable error) {
+                            errorHandled[0] = true;
                             throw new RuntimeException(error);
                         }
                     });
@@ -231,12 +247,19 @@ public class ReActAgent {
 
                 notifyHooks(new PostReasoningEvent(round, lastResponse[0]));
 
-                List<ToolCall> toolCalls = parseToolCalls(fullOutput);
+                // Strip <think>...</think> blocks before parsing tool calls
+                String stripped = stripThinkBlocks(fullOutput);
+                List<ToolCall> toolCalls = parseToolCalls(stripped);
 
                 if (toolCalls.isEmpty()) {
                     LOG.info("[ReAct流式] 第 {} 轮无工具调用", round + 1);
-                    if (decision[0] != 1) {
-                        listener.onContentToken(fullOutput);
+                    if (decision[0] == 1) {
+                        // Was streamed in real-time — already on screen, nothing to do
+                    } else {
+                        // Was buffered (think/tool_call/json) — forward stripped content if any
+                        if (!stripped.isBlank()) {
+                            listener.onContentToken(stripped);
+                        }
                     }
                     listener.onComplete(lastResponse[0]);
                     return CompletableFuture.completedFuture(lastResponse[0]);
@@ -291,10 +314,13 @@ public class ReActAgent {
                 String callSummary = toolCalls.stream()
                     .map(tc -> tc.toolName() + "(" + tc.arguments() + ")")
                     .collect(Collectors.joining(", "));
-                history.add(Message.assistant("[调用工具: " + callSummary + "]"));
-                history.add(Message.tool(results.stream()
-                    .map(ToolResult::content)
-                    .collect(Collectors.joining("\n"))));
+                List<Map<String, Object>> tcList = toolCalls.stream()
+                    .map(tc -> Map.<String, Object>of("id", tc.id(), "name", tc.toolName(), "arguments", tc.arguments()))
+                    .toList();
+                history.add(Message.assistantWithToolCalls("[调用工具: " + callSummary + "]", tcList));
+                for (int i = 0; i < toolCalls.size(); i++) {
+                    history.add(Message.toolResult(results.get(i).content(), toolCalls.get(i).id()));
+                }
             }
 
             LOG.warn("[ReAct流式] 达到最大迭代 ({})，返回当前响应", maxIterations);
@@ -303,7 +329,9 @@ public class ReActAgent {
         } catch (Exception e) {
             LOG.error("[ReAct流式] 异常: {}", e.getMessage(), e);
             notifyHooks(new ErrorEvent(-1, "stream", e));
-            listener.onError(e);
+            if (!errorHandled[0]) {
+                listener.onError(e);
+            }
             return CompletableFuture.failedFuture(e);
         }
     }
@@ -394,7 +422,16 @@ public class ReActAgent {
         if (!embedded.isEmpty()) return embedded;
 
         // 策略3：tool_call("name", {...}) 格式
-        return parseToolCallFunction(content);
+        List<ToolCall> funcCalls = parseToolCallFunction(content);
+        if (!funcCalls.isEmpty()) return funcCalls;
+
+        // Strategy 4: MiniMax XML format tool calls
+        if (content.contains("<minimax:tool_call") || content.contains("<invoke")) {
+            List<ToolCall> miniMaxCalls = parseMiniMaxToolCalls(content);
+            if (!miniMaxCalls.isEmpty()) return miniMaxCalls;
+        }
+
+        return List.of();
     }
 
     private ToolCall parseSingleToolCall(JsonNode node) {
@@ -452,6 +489,25 @@ public class ReActAgent {
         return calls;
     }
 
+    private List<ToolCall> parseMiniMaxToolCalls(String text) {
+        List<ToolCall> calls = new ArrayList<>();
+        Matcher invokeMatcher = Pattern.compile("<invoke\\s+name=\"([^\"]+)\">").matcher(text);
+        while (invokeMatcher.find()) {
+            String toolName = invokeMatcher.group(1);
+            int start = invokeMatcher.end();
+            int end = text.indexOf("</invoke>", start);
+            if (end < 0) end = text.length();
+            String invokeBody = text.substring(start, end);
+            Matcher paramMatcher = Pattern.compile("<parameter\\s+name=\"([^\"]+)\">([\\s\\S]*?)</parameter>").matcher(invokeBody);
+            ObjectNode args = MAPPER.createObjectNode();
+            while (paramMatcher.find()) {
+                args.put(paramMatcher.group(1), paramMatcher.group(2).trim());
+            }
+            calls.add(ToolCall.of(toolName, args.toString()));
+        }
+        return calls;
+    }
+
     private int findNextJsonToolCall(String text, int fromIndex) {
         for (ToolDefinition tool : toolRegistry.getDefinitions()) {
             String pattern = "\"" + tool.name() + "\"";
@@ -459,7 +515,7 @@ public class ReActAgent {
             if (idx > 0) {
                 for (int i = idx - 1; i >= 0; i--) {
                     if (text.charAt(i) == '{') return i;
-                    if (!Character.isWhitespace(text.charAt(i)) && text.charAt(i) != '"'
+                    if (!Character.isWhitespace(text.charAt(i)) && text.charAt(i) != '\"'
                         && text.charAt(i) != ':' && text.charAt(i) != 'n'
                         && text.charAt(i) != 'a' && text.charAt(i) != 'm'
                         && text.charAt(i) != 'e') break;
@@ -468,7 +524,6 @@ public class ReActAgent {
         }
         return -1;
     }
-
     private List<ToolResult> executeTools(List<ToolCall> toolCalls) {
         return toolCalls.stream()
             .map(tc -> {
@@ -480,6 +535,20 @@ public class ReActAgent {
                 }
             })
             .toList();
+    }
+
+    private static boolean startsWithThink(String text) {
+        return text.startsWith("<think") || text.startsWith("<thought")
+            || text.startsWith("<think>") || text.startsWith("<think>");
+    }
+
+    private static String stripThinkBlocks(String text) {
+        if (text == null) return "";
+        return text.replaceAll("(?s)<think[^>]*>.*?</think>", "")
+                   .replaceAll("(?s)<think>.*?</think>", "")
+                   .replaceAll("(?s)<thought[^>]*>.*?</thought>", "")
+                   .replaceAll("(?s)<thinking[^>]*>.*?</thinking>", "")
+                   .trim();
     }
 
     private static String cleanMarkdownBlock(String text) {

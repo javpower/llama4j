@@ -299,6 +299,13 @@ public final class ChatService {
     /** 关闭流式执行器和推理上下文，释放原生资源 */
     public void shutdown() {
         streamExecutor.shutdownNow();
+        try {
+            if (!streamExecutor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                LOG.warn("Stream executor did not terminate within 5s");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         context.close();
         LOG.info("ChatService 已关闭");
     }

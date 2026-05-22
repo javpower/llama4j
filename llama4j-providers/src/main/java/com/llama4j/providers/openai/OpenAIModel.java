@@ -3,7 +3,6 @@ package com.llama4j.providers.openai;
 import com.llama4j.chat.Message;
 import com.llama4j.chat.Role;
 import com.llama4j.core.*;
-import com.llama4j.core.ToolSchema;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -69,7 +68,10 @@ public class OpenAIModel implements Model {
             }
 
             return parseResponse(httpResponse.body(), latencyMs);
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException e) {
+            throw new RuntimeException("OpenAI API 调用失败", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException("OpenAI API 调用失败", e);
         }
     }
@@ -88,17 +90,20 @@ public class OpenAIModel implements Model {
                     if (response.statusCode() != 200) {
                         try {
                             String errorBody = response.body().collect(java.util.stream.Collectors.joining());
-                            listener.onError(new RuntimeException("OpenAI API 错误: " + errorBody));
+                            RuntimeException error = new RuntimeException("OpenAI API error: " + response.statusCode() + " " + errorBody);
+                            listener.onError(error);
+                            future.completeExceptionally(error);
                         } catch (Exception e) {
                             listener.onError(e);
+                            future.completeExceptionally(e);
                         }
                         return;
                     }
 
                     try {
                         StringBuilder contentBuilder = new StringBuilder();
-                        int promptTokens = 0;
-                        int completionTokens = 0;
+                        final int[] promptTokens = {0};
+                        final int[] completionTokens = {0};
 
                         response.body().forEach(line -> {
                             try {
@@ -117,10 +122,15 @@ public class OpenAIModel implements Model {
                                             listener.onToken(token);
                                         }
                                     }
-                                    // 解析 usage（如果有）
+                                    // Extract usage from the final streaming chunk
                                     if (chunk.has("usage") && !chunk.get("usage").isNull()) {
                                         JsonNode usage = chunk.get("usage");
-                                        // 这些会在最后的 chunk 中出现
+                                        if (usage.has("prompt_tokens")) {
+                                            promptTokens[0] = usage.get("prompt_tokens").asInt();
+                                        }
+                                        if (usage.has("completion_tokens")) {
+                                            completionTokens[0] = usage.get("completion_tokens").asInt();
+                                        }
                                     }
                                 }
                             } catch (Exception e) {
@@ -130,10 +140,10 @@ public class OpenAIModel implements Model {
 
                         long latencyMs = System.currentTimeMillis() - startTime;
                         String content = contentBuilder.toString();
-                        int compTokens = estimateTokens(content);
+                        int compTokens = completionTokens[0] > 0 ? completionTokens[0] : estimateTokens(content);
                         double tps = latencyMs > 0 ? (double) compTokens / (latencyMs / 1000.0) : 0.0;
 
-                        ChatResponse chatResponse = ChatResponse.of(content, 0, compTokens, tps, latencyMs);
+                        ChatResponse chatResponse = ChatResponse.of(content, promptTokens[0], compTokens, tps, latencyMs);
                         listener.onComplete(chatResponse);
                         future.complete(chatResponse);
                     } catch (Exception e) {
@@ -165,7 +175,11 @@ public class OpenAIModel implements Model {
 
     private HttpRequest buildHttpRequest(ObjectNode body) throws IOException {
         String jsonBody = MAPPER.writeValueAsString(body);
-        String endpoint = config.baseUrl().replaceAll("/+$", "") + "/v1/chat/completions";
+        String base = config.baseUrl().replaceAll("/+$", "");
+        // 如果 baseUrl 已经以 /v1 结尾，不再重复添加
+        String endpoint = base.endsWith("/v1")
+            ? base + "/chat/completions"
+            : base + "/v1/chat/completions";
 
         return HttpRequest.newBuilder()
             .uri(URI.create(endpoint))
@@ -187,13 +201,45 @@ public class OpenAIModel implements Model {
             ObjectNode msgNode = messages.addObject();
             msgNode.put("role", msg.role().value());
             msgNode.put("content", msg.content());
+
+            // assistant 消息带 tool_calls
+            if (msg.role() == Role.ASSISTANT && !msg.toolCalls().isEmpty()) {
+                ArrayNode tcArray = msgNode.putArray("tool_calls");
+                for (Map<String, Object> tc : msg.toolCalls()) {
+                    ObjectNode tcNode = tcArray.addObject();
+                    tcNode.put("id", String.valueOf(tc.getOrDefault("id", "")));
+                    tcNode.put("type", "function");
+                    ObjectNode func = tcNode.putObject("function");
+                    func.put("name", String.valueOf(tc.getOrDefault("name", "")));
+                    func.put("arguments", String.valueOf(tc.getOrDefault("arguments", "")));
+                }
+            }
+
+            // Tool result 消息必须包含 tool_call_id
+            if (msg.role() == Role.TOOL && msg.toolCallId() != null) {
+                msgNode.put("tool_call_id", msg.toolCallId());
+            }
         }
 
-        // 参数
-        if (request.temperature() != 0.7f) body.put("temperature", request.temperature());
-        if (request.maxTokens() != 2048) body.put("max_tokens", request.maxTokens());
-        if (request.topP() != 0.9f) body.put("top_p", request.topP());
+        // 参数 — always send to avoid floating-point comparison issues with defaults
+        body.put("temperature", request.temperature());
+        body.put("max_tokens", request.maxTokens());
+        body.put("top_p", request.topP());
         if (request.seed() != -1) body.put("seed", request.seed());
+
+        // Stop tokens
+        if (!request.stopTokens().isEmpty()) {
+            ArrayNode stopArray = body.putArray("stop");
+            for (String stopToken : request.stopTokens()) {
+                stopArray.add(stopToken);
+            }
+        }
+
+        // JSON mode
+        if (request.jsonMode()) {
+            ObjectNode responseFormat = body.putObject("response_format");
+            responseFormat.put("type", "json_object");
+        }
 
         return body;
     }

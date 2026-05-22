@@ -1,76 +1,102 @@
-# llama4j
+<div align="center">
+
+# 🦙 llama4j
+
+### **Java 生态唯一的生产级本地大模型推理框架**
+
+**直接在 JVM 里跑 LLM —— 不需要 Python，不需要 Docker，不需要外部服务**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![JDK](https://img.shields.io/badge/JDK-17+-green.svg)]()
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3+-6db33f.svg)]()
 [![llama.cpp](https://img.shields.io/badge/llama.cpp-latest-orange.svg)]()
+[![Modules](https://img.shields.io/badge/Modules-12-purple.svg)]()
+[![GPU](https://img.shields.io/badge/GPU-Metal%20%7C%20CUDA%20%7C%20Vulkan-brightgreen.svg)]()
 
-> **Production-grade Java bindings for llama.cpp** -- Spring Boot native LLM inference framework
+</div>
 
-**llama4j** brings large language models into the Java ecosystem with zero friction. It wraps [llama.cpp](https://github.com/ggerganov/llama.cpp) via JNI, delivering a Spring Boot-native experience with OpenAI-compatible APIs, automatic chat template detection, function calling, and production-ready observability.
-
-**Stop stitching together Python microservices. Run LLM inference where your Java code lives.**
-
----
-
-## Why llama4j?
-
-### The Problem
-
-Deploying LLMs in Java enterprises today is painful:
-
-```
-Traditional Approach                          llama4j
-─────────────────────────────────────────     ─────────────────────────────────
-[Java App] ──HTTP──▶ [Python Server]          [Java App + llama4j]
-              │        │                      │
-              │     [FastAPI]                  │  Direct JNI call
-              │     [vLLM/ollama]              │  Zero network hop
-              │     [CUDA Runtime]             │  Single process
-              │        │                      │
-              └────────┘                      └──▶ [llama.cpp + GPU]
-                                                  ↑
-Extra: Python env, Docker, service discovery,     One JAR. One process.
-load balancing, health checks ×2, latency tax.    Zero DevOps overhead.
-```
-
-### Head-to-Head Comparison
-
-| Dimension | Traditional (Python sidecar) | Ollama | vLLM | **llama4j** |
-|-----------|------------------------------|--------|------|-------------|
-| **Language** | Python + HTTP bridge | Go (custom API) | Python + CUDA | **Java native JNI** |
-| **Deployment** | 2 services + Docker Compose | Standalone binary | Docker + GPU image | **Single Spring Boot JAR** |
-| **Network hop** | HTTP (1-5ms overhead) | HTTP | HTTP | **In-process (0ms)** |
-| **Serialization** | JSON round-trip | JSON | JSON | **Direct object pass** |
-| **Spring Boot integration** | Manual REST client | Manual REST client | Manual REST client | **Auto-config, Actuator, DI** |
-| **OpenAI API** | You build it | Built-in (different format) | Built-in | **Drop-in compatible** |
-| **Function calling** | DIY prompt engineering | Limited | Limited | **@Tool annotation, ReAct loop** |
-| **Observability** | Separate metrics per service | Basic | Prometheus | **Micrometer, 8 metrics, auto-export** |
-| **Session/KV cache** | Stateless per request | Basic | PagedAttention | **Checkpoint/restore, session affinity** |
-| **Chat templates** | Hardcoded per model | Auto-detect | Auto-detect | **10+ formats + Jinja2 parser** |
-| **Cold start** | Python init + model load | Fast | Slow (compile kernels) | **Fast (precompiled JNI)** |
-| **Memory overhead** | Python runtime (~200MB) | ~50MB | ~500MB+ | **~20MB (JVM only)** |
-| **DevOps complexity** | High (2 stacks) | Low (but external) | Medium | **Zero (embedded)** |
-
-### When to Choose llama4j
-
-- **You're a Java/Spring shop** and don't want to maintain a Python stack
-- **You need sub-millisecond inference latency** without network hops
-- **You want LLM inference as a library**, not as a service
-- **You need production observability** integrated with your existing Micrometer/Prometheus/Grafana stack
-- **You want function calling** that feels native to Java (annotations, not prompt hacking)
+> [llama.cpp](https://github.com/ggerganov/llama.cpp) 是当今最强的高性能 LLM 推理引擎 —— Apple、Google、Microsoft 都在用它跑本地模型。
+> **但它没有官方 Java 绑定。** Java 开发者要么起一个 Python 服务走 HTTP，要么调 Ollama 的 REST API，忍受 1-5ms 的网络延迟和 JSON 序列化开销。
+>
+> **llama4j 改变了这一切。**
+>
+> 通过 JNI 直接调用 llama.cpp 原生 C++ 核心，把大模型推理变成一个普通的 Java 方法调用 —— 零网络跳转、零序列化、零外部进程，延迟从毫秒级降到微秒级。同时内置浏览器端 AI 编码助手和云端大模型支持，本地模型 + 云端 API 一键切换。
+>
+> 一个 JAR。一个进程。GPU 全速。这就是 llama4j。
 
 ---
 
-## Architecture
+## 为什么需要 llama4j？
+
+### 核心问题：Java 生态缺少本地 LLM 推理能力
+
+2026 年了，所有主流 LLM 推理框架都在 Python 生态：
+
+| 框架 | 语言 | Java 支持 |
+|------|------|-----------|
+| llama.cpp | C/C++ | 无官方绑定 |
+| vLLM | Python | 无 |
+| Ollama | Go | 仅 HTTP API |
+| llamafile | C++ | 无 |
+| ONNX Runtime | Python/C++ | 有但无 LLM 优化 |
+| DJL | Java | 仅云端模型，无 GGUF |
+
+**Java 开发者想跑本地大模型，只有两条路：**
 
 ```
-                          ┌─────────────────────────────────────┐
-                          │        Your Spring Boot App         │
-                          │   (REST Controllers, Services, DI)  │
-                          └──────────────┬──────────────────────┘
-                                         │
-                                         ▼
+❌ 方案 A：Python 侧车服务（痛点爆炸）
+
+   [Spring Boot] ──HTTP──▶ [Python FastAPI]
+         │                     │
+         │                  [vLLM / ollama]
+         │                     │
+         │                  [CUDA Runtime]
+         │                     │
+   需要：Python 环境             需要：Docker + GPU 镜像
+         维护两套代码                  服务发现 + 健康检查 ×2
+         JSON 序列化开销              负载均衡
+         网络延迟 (1-5ms/调用)        冷启动慢
+         双语言栈运维成本              2× 内存开销
+
+
+✅ 方案 B：llama4j（一个 JAR 搞定）
+
+   [Spring Boot + llama4j]
+         │
+    直接 JNI 调用，零网络开销
+    单进程，单 JAR
+    自动 GPU 加速
+    Spring Boot 原生集成
+```
+
+### 没有对比就没有伤害
+
+| 维度 | Python 侧车方案 | Ollama | **llama4j** |
+|------|-----------------|--------|-------------|
+| **语言** | Python + HTTP 桥接 | Go（私有 API） | **Java 原生 JNI** |
+| **部署** | 2 个服务 + Docker Compose | 独立二进制 | **单个 Spring Boot JAR** |
+| **网络开销** | HTTP 1-5ms/调用 | HTTP 1-5ms | **进程内调用 0ms** |
+| **序列化** | JSON 往返 | JSON 往返 | **直接对象传递** |
+| **Spring 集成** | 手写 REST Client | 手写 REST Client | **Auto-config + DI + Actuator** |
+| **OpenAI API** | 自己实现 | 内置（格式不同） | **完全兼容，即插即用** |
+| **函数调用** | 自己拼 Prompt | 有限 | **@Tool 注解 + ReAct 循环** |
+| **可观测性** | 两套监控系统 | 基础 | **Micrometer 8 指标自动导出** |
+| **会话管理** | 无状态 | 基础 | **KV Cache 存档/恢复** |
+| **聊天模板** | 每个模型硬编码 | 自动检测 | **10+ 格式 + Jinja2 解析器** |
+| **内存开销** | Python 运行时 ~200MB | ~50MB | **仅 JVM ~20MB** |
+| **DevOps** | 高（双技术栈） | 中（外部依赖） | **零（嵌入式）** |
+
+---
+
+## 架构
+
+```
+                         ┌─────────────────────────────────────┐
+                         │        Your Spring Boot App         │
+                         │   (REST Controllers, Services, DI)  │
+                         └──────────────┬──────────────────────┘
+                                        │
+                                        ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                        llama4j-spring-boot-starter                           │
 │  ┌─────────────────┐   ┌──────────────────┐   ┌──────────────────────────┐  │
@@ -125,13 +151,11 @@ load balancing, health checks ×2, latency tax.    Zero DevOps overhead.
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Request flow:** HTTP request → Spring MVC → `ChatService` → chat template render → `LlamaContext.generate()` → JNI → llama.cpp sampler → token stream → SSE response
-
 ---
 
-## Quick Start
+## 快速开始
 
-### 1. Add Dependency
+### 30 秒上手
 
 ```xml
 <dependency>
@@ -141,347 +165,266 @@ load balancing, health checks ×2, latency tax.    Zero DevOps overhead.
 </dependency>
 ```
 
-### 2. Configure Model
-
 ```yaml
 llama4j:
   model:
     path: /models/qwen2.5-7b-q4_k_m.gguf
-    # Or auto-download (ModelScope first, then HuggingFace):
+    # 也支持自动下载（ModelScope 优先，HuggingFace 回退）：
     # id: Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M
-    # Or explicitly from ModelScope:
     # id: modelscope:Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M
-    # Or explicitly from HuggingFace:
     # id: hf:unsloth/Qwen2.5-7B-Instruct:Q4_K_M
     n-ctx: 4096
-    n-gpu-layers: -1    # offload all layers to GPU
+    n-gpu-layers: -1    # 全部层卸载到 GPU
     n-threads: 8
 ```
-
-### 3. Run
 
 ```bash
 mvn spring-boot:run
 ```
-
-### 4. Call the API
 
 ```bash
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "messages": [
-      {"role": "system", "content": "You are a helpful assistant."},
-      {"role": "user", "content": "Explain quantum computing in one paragraph."}
+      {"role": "user", "content": "用一段话解释量子计算"}
     ],
     "temperature": 0.7
   }'
 ```
 
-That's it. No Python. No Docker. No sidecar. Just Java.
+没有 Python。没有 Docker。没有外部依赖。一个 JAR，一个进程，大模型推理就在你的 Java 应用里跑起来了。
 
 ---
 
-## Core Features
+## 核心能力
 
-### OpenAI-Compatible Drop-In API
+### 本地模型推理 — 零外部依赖
 
-Your existing OpenAI SDK clients work unchanged:
+这是 llama4j 的核心价值。不是调用云端 API，不是启动 Python 服务，而是**直接在 JVM 进程内跑 GGUF 模型**：
 
-```java
-// Works with openai-python, openai-node, curl, Postman, anything
-POST /v1/chat/completions
-POST /v1/chat/completions  (stream: true → SSE)
-GET  /v1/models
+- **Metal** (Apple Silicon) / **CUDA** (NVIDIA) / **Vulkan** / **CPU** 全平台 GPU 加速
+- 10+ 聊天模板自动检测（Llama 3, ChatML, Gemma, Phi-3, Mistral, DeepSeek, Jinja2...）
+- KV Cache 存档/恢复，多轮对话无需重新 prompt
+- Grammar 约束生成 + JSON Mode
+- Embedding 向量 + 相似度搜索
+- 流式输出（SSE）
+
+### 云端大模型 — 同时支持
+
+llama4j 不只是本地推理。通过 `llama4j-providers` 模块，无缝接入任何 OpenAI 兼容 API：
+
+```yaml
+llama4j:
+  providers:
+    - name: deepseek
+      api-key: sk-xxx
+      base-url: https://api.deepseek.com
+      model: deepseek-chat
+    - name: minimax
+      api-key: xxx
+      base-url: https://api.minimax.chat/v1
+      model: MiniMax-M2.7
 ```
 
-### Function Calling with @Tool
+**本地模型 + 云端模型，同一套 API，运行时一键切换。**
+
+### 函数调用 — Java 原生 @Tool 注解
 
 ```java
 @Component
-public class WeatherTools {
+public class OrderTools {
 
-    @Tool(name = "get_weather", description = "Get current weather for a city")
-    public WeatherReport getWeather(
-            @ToolParam(description = "City name, e.g. Beijing") String city,
-            @ToolParam(description = "Temperature unit") String unit) {
-        return weatherService.fetch(city, unit);
+    @Tool(name = "query_order", description = "根据订单号查询订单状态")
+    public OrderStatus queryOrder(
+            @ToolParam(description = "订单号") String orderId) {
+        return orderService.getStatus(orderId);
     }
 }
-
-// LLM automatically invokes tools in a ReAct loop -- no prompt engineering needed
 ```
 
-**Server-side tool execution:** When tools are registered via `@Tool`, the server automatically detects tool calls, executes them, and feeds results back to the model in a ReAct loop. Both sync and streaming (SSE) paths are supported.
+LLM 自动在 ReAct 循环中调用工具——不需要手写 Prompt，不需要解析 JSON，注册即用。
 
-**Streaming with tools** produces OpenAI-compatible SSE events:
+### AI 编码助手 — 浏览器端 Cursor 级体验
+
+llama4j 内置了一个完整的浏览器端 AI 编码助手（`llama4j-web` 模块），类似 Cursor/Windsurf 的交互体验：
 
 ```
-tool_calls delta (name + arguments) → finish_reason: "tool_calls" → content delta (real-time) → finish_reason: "stop" → [DONE]
+┌───────────────────────────────────────────────────────────────┐
+│  Llama4j Agent          [Model: Qwen2.5-7B ▼]       [⚙] [?] │
+├────┬───────────┬──────────────────────────┬───────────────────┤
+│    │           │                          │                   │
+│ A  │  文件树    │     Monaco Editor        │   Agent 对话面板   │
+│ c  │  [Files]  │     (多标签 + Diff 视图)   │                   │
+│ t  │  [Search] │                          │  🤖 Agent: 我来   │
+│ i  │  [Git]    │     语法高亮 + Minimap    │  帮你分析这个文件  │
+│ v  │           │                          │  [tool:read_file]  │
+│ i  │  ├─src/   │                          │  ✓ 128 lines      │
+│ t  │  │ ├─Main │                          │                   │
+│ y  │  │ └─App  │                          │  Agent: 这个方法   │
+│    │  ├─pom.xml│                          │  有个空指针风险... │
+│ B  │  └─README │                          │                   │
+│ a  │           ├──────────────────────────┤  [输入...]  [发送] │
+│ r  │           │     集成终端              │                   │
+│    │           │     (xterm.js + WebSocket)│                   │
+│    │           │     bash$ _              │                   │
+├────┴───────────┴──────────────────────────┴───────────────────┤
+│  Git: main │ Java 17 │ UTF-8 │ Spaces: 4 │ Ln 42             │
+└───────────────────────────────────────────────────────────────┘
 ```
 
-The client observes tool calls in the event stream but does not need to execute them.
+**功能亮点：**
+- **9 种 Agent 工具**：read_file / write_file / edit_file / list_files / search_files / find_files / run_command / web_search / web_fetch
+- **Monaco Editor**：多标签、语法高亮、Diff 视图、Ctrl+S 保存
+- **集成终端**：xterm.js + WebSocket PTY，真实 shell
+- **Git 面板**：状态、Diff、提交、分支切换（JGit）
+- **流式 Agent 对话**：SSE 实时 token 流、工具调用折叠面板、权限审批弹窗
+- **Markdown 渲染**：marked.js + highlight.js + DOMPurify 防 XSS
+- **双模运行**：本地 GGUF 模型 或 云端 API，随时切换
 
-### Grammar-Constrained Generation & JSON Mode
+```bash
+# 启动 Web IDE
+java -jar llama4j-web-1.0.0-SNAPSHOT.jar
 
-Force structured output with GBNF grammar constraints:
+# 浏览器访问
+open http://localhost:8080
+```
+
+### OpenAI 兼容 API — 零改造迁移
+
+你的 OpenAI SDK 客户端一行不用改：
+
+```
+POST /v1/chat/completions          # 对话补全（同步 + SSE 流式）
+POST /v1/chat/completions?stream=true
+GET  /v1/models                    # 模型列表
+```
+
+### 生产级可观测性
+
+8 个 Micrometer 指标自动导出，接入 Prometheus / Grafana 零代码：
+
+```
+llama4j.inference.requests     -- 推理请求总数
+llama4j.inference.latency      -- 推理延迟分布
+llama4j.tokens.prompt          -- Prompt Token 数
+llama4j.tokens.completion      -- 补全 Token 数
+llama4j.tokens.per.second      -- 生成吞吐量
+llama4j.kv.cache.usage         -- KV Cache 利用率
+llama4j.queue.depth            -- 请求队列深度
+llama4j.inference.errors       -- 推理错误计数
+```
+
+---
+
+## 模块一览
+
+| 模块 | 职责 |
+|------|------|
+| **llama4j-native** | JNI 桥接 llama.cpp。`LlamaContext`、`GrammarConstraint`、`EmbeddingVector` — 原生资源管理 |
+| **llama4j-core** | `ChatService`、`EmbeddingService`、`SessionManager`、`InferenceStats` — 编排层 |
+| **llama4j-chat** | 聊天模板引擎，10+ 格式 + Jinja2 解析器 |
+| **llama4j-tools** | `@Tool` 注解驱动的函数调用 + ReAct 推理循环 |
+| **llama4j-providers** | OpenAI 兼容 API 客户端，支持任何云端大模型 |
+| **llama4j-metrics** | Micrometer 集成，8 个核心指标 |
+| **llama4j-repository** | ModelScope + HuggingFace 模型下载 + 硬件量化推荐 |
+| **llama4j-agent** | Agent 核心：权限管理、上下文加载、系统提示词组装 |
+| **llama4j-web** | 浏览器端 AI 编码助手 — Monaco Editor + xterm.js + Agent 聊天 |
+| **llama4j-spring-boot-starter** | Spring Boot 自动配置 + OpenAI API 控制器 + Actuator |
+| **llama4j-samples** | 示例应用 |
+
+---
+
+## 进阶用法
+
+### JSON Mode / Grammar 约束
 
 ```java
-// One-flag JSON mode
-ChatRequest.builder().jsonMode(true).addMessage(Role.USER, "...").build();
+// 一行开启 JSON 模式
+ChatRequest request = ChatRequest.builder()
+    .system("你是数据提取助手")
+    .addMessage(Role.USER, "从以下文本提取姓名和年龄：张三今年30岁")
+    .jsonMode(true)
+    .build();
+ChatResponse response = service.chat(request);
+// 输出: {"name": "张三", "age": 30}
 
-// Custom grammar with AutoCloseable lifecycle
+// 自定义 GBNF 语法约束
 try (GrammarConstraint gc = GrammarConstraint.create(ctx, gbnf, "root")) {
     params = GenerateParams.builder("...").grammar(gc).build();
 }
 ```
 
-### Embedding Vectors & Similarity Search
+### Embedding 向量 + 相似度
 
 ```java
-EmbeddingService service = new EmbeddingService(ctx);
-EmbeddingVector vec = service.embed("text");
-double score = service.similarity("cat", "dog");
-List<SimilarityResult> topK = service.findMostSimilar("query", candidates, 5);
+EmbeddingService embedService = new EmbeddingService(ctx);
+
+EmbeddingVector vec = embedService.embed("机器学习是人工智能的一个分支");
+double score = embedService.similarity("猫是宠物", "狗是宠物");  // ~0.85
+
+List<SimilarityResult> top2 = embedService.findMostSimilar("编程",
+    List.of("Java是编程语言", "猫是哺乳动物", "Python是脚本语言"), 2);
+// → [Java是编程语言 (0.92), Python是脚本语言 (0.88)]
 ```
 
-### 10+ Chat Template Formats
-
-Auto-detected from GGUF metadata -- zero configuration:
-
-| Format | Models |
-|--------|--------|
-| **Llama 3** | Meta Llama 3 / 3.1 / 3.2 |
-| **ChatML** | Qwen 2.5, Yi, DeepSeek V2 |
-| **Gemma** | Google Gemma 2 |
-| **Phi-3** | Microsoft Phi-3 / 3.5 |
-| **Mistral** | Mistral, Mixtral |
-| **DeepSeek** | DeepSeek Coder/V2/V3 |
-| **Vicuna** | Vicuna, LongChat |
-| **Alpaca** | Alpaca, OpenAssistant |
-| **Yi** | Yi-34B, Yi-1.5 |
-| **Jinja2** | Any GGUF with embedded Jinja2 template |
-
-Falls back to built-in Jinja2 subset parser when no hardcoded format matches.
-
-### Production Observability
-
-8 metrics exported automatically via Micrometer:
-
-```
-llama4j.inference.requests     (Counter)   -- total inference requests
-llama4j.inference.latency      (Timer)     -- inference latency distribution
-llama4j.tokens.prompt          (Summary)   -- prompt token count
-llama4j.tokens.completion      (Summary)   -- completion token count
-llama4j.tokens.per.second      (Gauge)     -- generation throughput
-llama4j.kv.cache.usage         (Gauge)     -- KV cache utilization
-llama4j.queue.depth            (Gauge)     -- request queue depth
-llama4j.inference.errors       (Counter)   -- inference error count
-```
-
-Plug into Prometheus, Datadog, or Grafana with zero code changes.
-
-### Session Management & KV Cache
+### 流式推理 + 工具调用
 
 ```java
-SessionManager manager = new SessionManager(new InMemorySessionStore());
-Session session = manager.createSession("qwen2.5-7b");
-
-// Multi-turn conversation with KV cache checkpoint
-manager.checkpoint(session.id(), context);
-
-// Resume later -- KV cache restored, no re-prompting
-Session restored = manager.resumeSession(session.id(), context);
-```
-
-### Hardware-Aware Model Selection
-
-```java
-GgufRepository repo = new GgufRepository();
-
-// Auto-download (ModelScope first for China users, then HuggingFace)
-Path model = repo.resolve("Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M");
-
-// Explicitly from ModelScope
-Path msModel = repo.resolve("modelscope:Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M");
-
-// Explicitly from HuggingFace
-Path hfModel = repo.resolve("hf:unsloth/Qwen2.5-7B-Instruct:Q4_K_M");
-
-// Smart quantization recommendation based on available VRAM
-String quant = repo.recommendQuantization(7.0); // 7B model
-// Returns: "Q4_K_M" for 8GB VRAM, "Q5_K_M" for 12GB, "Q8_0" for 16GB+
-```
-
----
-
-## Module Reference
-
-| Module | Purpose |
-|--------|---------|
-| **llama4j-native** | JNI bridge to llama.cpp. `LlamaContext`, `GrammarConstraint`, `EmbeddingVector`, `GenerateParams` -- native resource management |
-| **llama4j-core** | `ChatService`, `EmbeddingService`, `SessionManager`, `InferenceStats`, `ChatTemplateUtil` -- the orchestration layer |
-| **llama4j-chat** | Chat template engine with 10+ formats and Jinja2 parser |
-| **llama4j-tools** | `@Tool` annotation-driven function calling with ReAct loop |
-| **llama4j-metrics** | Micrometer integration with 8 core metrics |
-| **llama4j-repository** | ModelScope + HuggingFace integration, hardware-aware quantization advisor |
-| **llama4j-spring-boot-starter** | Auto-configuration, OpenAI API controller, Actuator endpoints |
-| **llama4j-samples** | Example applications |
-
----
-
-## Advanced Usage
-
-### JSON Mode / Grammar Constraints
-
-Force the model to output valid JSON (or any GBNF grammar):
-
-```java
-// Simple JSON mode — one flag
-ChatRequest request = ChatRequest.builder()
-    .system("You are a data extraction assistant.")
-    .addMessage(Role.USER, "Extract name and age from: John is 30 years old")
-    .jsonMode(true)
-    .build();
-ChatResponse response = service.chat(request);
-// Output: {"name": "John", "age": 30}
-
-// Custom grammar with lifecycle management
-try (GrammarConstraint gc = GrammarConstraint.json(ctx)) {
-    GenerateParams params = GenerateParams.builder("Generate a JSON array of colors")
-        .grammar(gc)
-        .maxTokens(256)
-        .build();
-    String result = ctx.generate(params);
-}  // gc.close() called automatically
-
-// Custom GBNF grammar (e.g., only output specific values)
-try (GrammarConstraint gc = GrammarConstraint.create(ctx, myGbnf, "root")) {
-    // ...
-}
-```
-
-### Embedding Vectors & Similarity
-
-```java
-try (LlamaContext ctx = new LlamaContext(modelPath, ModelParams.DEFAULT)) {
-    EmbeddingService embedService = new EmbeddingService(ctx);
-
-    // Single text embedding
-    EmbeddingVector vec = embedService.embed("机器学习是人工智能的一个分支");
-
-    // Similarity between two texts
-    double score = embedService.similarity("猫是宠物", "狗是宠物");  // ~0.85
-
-    // Find most similar documents
-    List<String> docs = List.of("Java是编程语言", "猫是哺乳动物", "Python是脚本语言");
-    List<SimilarityResult> top2 = embedService.findMostSimilar("编程", docs, 2);
-    // → [SimilarityResult("Java是编程语言", 0.92), SimilarityResult("Python是脚本语言", 0.88)]
-
-    // Direct vector operations
-    EmbeddingVector v1 = embedService.embed("hello");
-    EmbeddingVector v2 = embedService.embed("world");
-    double cosine = v1.cosineSimilarity(v2);
-    double dist = v1.euclideanDistance(v2);
-}
-```
-
-### Chat Template Utility
-
-```java
-// Render messages to prompt string using model's embedded template
-List<Message> messages = List.of(
-    Message.system("You are helpful."),
-    Message.user("Hello!")
-);
-String prompt = ChatTemplateUtil.applyTemplate(ctx, messages, true);
-
-// Or use ChatService's public renderPrompt
-String prompt = chatService.renderPrompt(messages);
-```
-
-### Streaming with SSE
-
-```java
-// Plain streaming (no tools)
+// 纯流式
 service.chatStream(request, new ChatStreamListener() {
     @Override public void onToken(String token) { System.out.print(token); }
     @Override public void onComplete(ChatResponse r) { System.out.println("\nDone!"); }
     @Override public void onError(Throwable e) { log.error("Stream failed", e); }
 });
 
-// Streaming with server-side tool execution
+// 流式 + 服务端工具执行
 service.chatStreamWithTools(request, new StreamingToolListener() {
     @Override public void onContentToken(String token) { System.out.print(token); }
-    @Override public void onToolCall(ToolCall call) { log.info("Tool: {}", call.toolName()); }
-    @Override public void onToolResult(ToolResult result) { log.info("Result: {}", result.content()); }
+    @Override public void onToolCall(ToolCall call) { log.info("调用工具: {}", call.toolName()); }
+    @Override public void onToolResult(ToolResult result) { log.info("结果: {}", result.content()); }
     @Override public void onComplete(ChatResponse r) { System.out.println("\nDone!"); }
-    @Override public void onError(Throwable e) { log.error("Failed", e); }
 });
 ```
 
-### Direct JNI Control
+### 直接 JNI 控制
 
 ```java
 try (LlamaContext ctx = new LlamaContext("/models/qwen2.5-7b.gguf", ModelParams.DEFAULT)) {
-    // Sync generation
-    String response = ctx.generate(GenerateParams.builder("Hello!")
+    String response = ctx.generate(GenerateParams.builder("你好！")
         .maxTokens(256).temperature(0.7f).build());
 
-    // Streaming
-    ctx.generateStream("Tell me a story", token -> System.out.print(token));
+    ctx.generateStream("讲个故事", token -> System.out.print(token));
 
-    // JSON mode via GenerateParams
-    String json = ctx.generate(GenerateParams.builder("Generate a user profile")
-        .jsonMode(true).maxTokens(256).build());
-
-    // Tokenization
     int[] tokens = ctx.tokenize("Hello world");
-
-    // Embeddings
     float[] embedding = ctx.embed("Hello world");
 
-    // Model metadata
-    System.out.println(ctx.getModelDescription());  // "Qwen2 1.5B Q4_K_M"
-    System.out.println(ctx.getModelSize());          // 1117320736
+    System.out.println(ctx.getModelDescription());   // "Qwen2 1.5B Q4_K_M"
     System.out.println(ctx.getModelParameterCount()); // 1543714304
 
-    // KV cache save/restore
-    SessionState state = ctx.saveSession();
-    ctx.loadSession(state);
+    SessionState state = ctx.saveSession();    // 存档 KV Cache
+    ctx.loadSession(state);                    // 恢复，无需重新 prompt
 }
 ```
 
-### Stream via curl
+### 模型自动下载 + 硬件感知量化推荐
 
-```bash
-# Plain streaming
-curl -N http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"Write a haiku"}],"stream":true}'
+```java
+GgufRepository repo = new GgufRepository();
 
-# Streaming with tool calls (tools are auto-detected from server-side @Tool registrations)
-curl -N http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"帮我计算 123 * 456"}],"stream":true}'
-```
+// 自动下载（国内 ModelScope 优先，HuggingFace 回退）
+Path model = repo.resolve("Qwen/Qwen2.5-7B-Instruct-GGUF:Q4_K_M");
 
-Streaming tool call response (OpenAI-compatible format):
-```
-data: {"choices":[{"delta":{"tool_calls":[{"id":"call-xxx","type":"function","function":{"name":"calculate","arguments":"{\"expression\":\"123 * 456\"}"}}]}}]}
-data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
-data: {"choices":[{"delta":{"content":"计算"},"finish_reason":null}]}
-data: {"choices":[{"delta":{"content":"结果"},"finish_reason":null}]}
-...
-data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
-data: [DONE]
+// 根据你的 GPU 显存推荐最佳量化级别
+String quant = repo.recommendQuantization(7.0);
+// 8GB VRAM → Q4_K_M | 12GB → Q5_K_M | 16GB+ → Q8_0
 ```
 
 ---
 
-## Building Native Libraries
+## 编译原生库
 
-llama4j calls llama.cpp through JNI. Pre-compiled native libraries are included, but you can rebuild:
+llama4j 通过 JNI 调用 llama.cpp。预编译的原生库已包含在 JAR 中，但你也可以自己编译：
 
 ```bash
 # macOS (Apple Silicon + Metal)
@@ -494,43 +437,37 @@ llama4j calls llama.cpp through JNI. Pre-compiled native libraries are included,
 .\scripts\build-native.ps1 -Classifier windows-x86_64 -Gpu cuda
 ```
 
-| Platform | GPU Backend | Library |
-|----------|-------------|---------|
+| 平台 | GPU 后端 | 库文件 |
+|------|----------|--------|
 | macOS (Apple Silicon / Intel) | Metal | `.dylib` |
 | Linux (x86_64) | CUDA / Vulkan / CPU | `.so` |
 | Windows (x86_64) | CUDA / CPU | `.dll` |
 
-See **[BUILD_NATIVE.md](docs/BUILD_NATIVE.md)** for detailed instructions and troubleshooting.
+详见 **[BUILD_NATIVE.md](docs/BUILD_NATIVE.md)**。
 
 ---
 
-## Build
+## 构建
 
 ```bash
-# Full build (all modules + native)
-mvn clean install
-
-# Java only (skip native compilation)
-mvn clean install -DskipNativeBuild=true
-
-# Run tests
-mvn test
+mvn clean install           # 完整构建（所有 12 个模块）
+mvn clean install -DskipTests  # 跳过测试
+mvn test                    # 运行测试
 ```
 
 ---
 
-## Requirements
+## 系统要求
 
-| Component | Minimum |
-|-----------|---------|
+| 组件 | 最低版本 |
+|------|----------|
 | JDK | 17+ |
-| llama.cpp | latest release |
-| CMake | 3.14+ |
-| GCC / Clang | 12+ / 15+ |
 | Spring Boot | 3.3+ |
+| CMake | 3.14+（编译原生库时） |
+| GCC / Clang | 12+ / 15+（编译原生库时） |
 
 ---
 
 ## License
 
-MIT License -- see [LICENSE](LICENSE)
+MIT License — see [LICENSE](LICENSE)

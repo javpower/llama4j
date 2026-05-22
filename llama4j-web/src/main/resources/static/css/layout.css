@@ -1,0 +1,518 @@
+#titlebar {
+    height: var(--titlebar-height);
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    -webkit-app-region: drag;
+    user-select: none;
+}
+
+.titlebar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.titlebar-icon {
+    display: flex;
+    align-items: center;
+}
+
+.titlebar-title {
+    font-size: var(--font-size-small);
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.titlebar-center {
+    font-size: var(--font-size-small);
+    color: var(--text-secondary);
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.titlebar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    -webkit-app-region: no-drag;
+}
+
+.model-select {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: var(--font-size-small);
+    outline: none;
+    cursor: pointer;
+    min-width: 150px;
+}
+.model-select:focus {
+    border-color: var(--accent);
+}
+
+.titlebar-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.titlebar-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+#main-container {
+    display: flex;
+    height: calc(100vh - var(--titlebar-height) - var(--statusbar-height));
+    overflow: hidden;
+}
+
+/* Activity Bar */
+#activity-bar {
+    width: var(--activity-bar-width);
+    background: var(--bg-tertiary);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 4px 0;
+    flex-shrink: 0;
+}
+
+.activity-btn {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    border-radius: 4px;
+    margin: 2px 0;
+    position: relative;
+    opacity: 0.6;
+}
+.activity-btn:hover {
+    opacity: 1;
+    background: var(--bg-hover);
+}
+.activity-btn.active {
+    opacity: 1;
+}
+.activity-btn.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    background: var(--accent);
+    border-radius: 0 2px 2px 0;
+}
+
+.activity-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.activity-icon svg {
+    width: 20px;
+    height: 20px;
+}
+
+.activity-spacer {
+    flex: 1;
+}
+
+/* Sidebar */
+#sidebar {
+    width: var(--sidebar-width);
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.sidebar-panel {
+    display: none;
+    flex-direction: column;
+    height: 100%;
+}
+.sidebar-panel.active {
+    display: flex;
+}
+
+.panel-header {
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    font-size: var(--font-size-small);
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.panel-action {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.panel-action:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.panel-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+/* Editor Area */
+#editor-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0;
+}
+
+#editor-tabs {
+    height: var(--tab-height);
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: stretch;
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+#editor-tabs::-webkit-scrollbar {
+    height: 3px;
+}
+
+.editor-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px;
+    font-size: var(--font-size-small);
+    color: var(--text-secondary);
+    border-right: 1px solid var(--border);
+    cursor: pointer;
+    white-space: nowrap;
+    min-width: 0;
+    flex-shrink: 0;
+}
+.editor-tab:hover {
+    background: var(--bg-hover);
+}
+.editor-tab.active {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--bg-primary);
+    margin-bottom: -1px;
+}
+.editor-tab .tab-modified {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-secondary);
+}
+.editor-tab .tab-close {
+    opacity: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 3px;
+    margin-left: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.editor-tab:hover .tab-close,
+.editor-tab.active .tab-close {
+    opacity: 1;
+}
+.editor-tab .tab-close:hover {
+    background: var(--bg-active);
+    color: var(--text-primary);
+}
+
+#editor-container {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Welcome View */
+.welcome-view {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    background: var(--bg-primary);
+}
+.welcome-content {
+    text-align: center;
+    max-width: 500px;
+}
+.welcome-content h1 {
+    font-size: 28px;
+    font-weight: 300;
+    color: var(--text-bright);
+    margin-bottom: 8px;
+}
+.welcome-content p {
+    color: var(--text-secondary);
+    margin-bottom: 32px;
+}
+.welcome-actions {
+    margin-bottom: 32px;
+}
+.welcome-btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 10px 24px;
+    border-radius: 4px;
+    font-size: var(--font-size);
+    cursor: pointer;
+}
+.welcome-btn:hover {
+    background: var(--accent-hover);
+}
+.welcome-shortcuts {
+    text-align: left;
+    color: var(--text-secondary);
+}
+.welcome-shortcuts h3 {
+    font-size: var(--font-size-small);
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+}
+.shortcut-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 0;
+    font-size: var(--font-size-small);
+}
+.shortcut-row kbd {
+    min-width: 80px;
+    text-align: center;
+}
+
+/* Terminal Area */
+#terminal-area {
+    height: var(--terminal-height);
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+#terminal-tabs {
+    height: 32px;
+    background: var(--bg-tertiary);
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.terminal-tab {
+    font-size: var(--font-size-small);
+    color: var(--text-secondary);
+    padding: 4px 12px;
+}
+.terminal-tab.active {
+    color: var(--text-primary);
+}
+
+.terminal-tab-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.terminal-tab-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.terminal-tab-spacer {
+    flex: 1;
+}
+
+#terminal-container {
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Agent Chat Panel */
+#agent-panel {
+    width: var(--agent-panel-width);
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+.agent-header {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.agent-title {
+    font-weight: 600;
+    font-size: var(--font-size);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.agent-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.agent-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.agent-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+#agent-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+#agent-input-area {
+    padding: 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+#agent-input {
+    flex: 1;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: var(--text-primary);
+    resize: none;
+    outline: none;
+    font-size: var(--font-size);
+    line-height: 1.4;
+    max-height: 150px;
+    min-height: 36px;
+}
+#agent-input:focus {
+    border-color: var(--accent);
+}
+
+.send-btn {
+    background: var(--accent);
+    border: none;
+    color: white;
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: flex-end;
+}
+.send-btn:hover {
+    background: var(--accent-hover);
+}
+.send-btn svg path {
+    fill: white;
+    stroke: white;
+}
+
+/* Status Bar */
+#statusbar {
+    height: var(--statusbar-height);
+    background: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    font-size: var(--font-size-small);
+    color: white;
+    flex-shrink: 0;
+}
+
+.statusbar-left, .statusbar-right {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.statusbar-item {
+    padding: 0 8px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+.statusbar-item:hover {
+    background: rgba(255, 255, 255, 0.12);
+}

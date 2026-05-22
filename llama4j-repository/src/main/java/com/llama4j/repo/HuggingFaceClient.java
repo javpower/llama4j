@@ -69,8 +69,9 @@ public final class HuggingFaceClient {
      * @return 匹配的模型 ID 列表
      */
     public List<String> searchModels(String query, int limit) throws IOException {
+        String encodedQuery = java.net.URLEncoder.encode(query, java.nio.charset.StandardCharsets.UTF_8);
         String url = String.format("%s/models?search=%s&limit=%d&filter=gguf",
-            HF_API_BASE, query, limit);
+            HF_API_BASE, encodedQuery, limit);
 
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(url))

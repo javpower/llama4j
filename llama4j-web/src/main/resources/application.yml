@@ -1,0 +1,33 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: llama4j-web-agent
+
+llama4j:
+  default-model: deepseek
+  models:
+    # 本地模型
+    # - name: qwen-local
+    #   type: local
+    #   path: ${LLAMA4J_MODEL_PATH:/Volumes/macEx/models/qwen2.5-7b-instruct-q4_k_m.gguf}
+    #   n-ctx: 4096
+    #   n-gpu-layers: -1
+    #   n-threads: 8
+    # OpenAI 兼容云端模型
+    - name: deepseek
+      type: openai
+      api-key: ${LLAMA4J_API_KEY:your-api-key-here}
+      base-url: https://api.minimaxi.com/v1
+      model-name: MiniMax-M2.7
+
+  inference:
+    temperature: 0.7
+    max-tokens: 4096
+
+logging:
+  level:
+    com.llama4j: DEBUG
+    com.llama4j.web: INFO
+    org.springframework.web: INFO

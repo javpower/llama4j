@@ -75,6 +75,13 @@ public class LlamaEndpoint {
     @PreDestroy
     void shutdown() {
         streamExecutor.shutdownNow();
+        try {
+            if (!streamExecutor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                LOG.warn("Stream executor did not terminate within 5s");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /** 解析请求中指定的模型，或使用默认模型 */

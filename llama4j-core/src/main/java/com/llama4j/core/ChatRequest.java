@@ -132,6 +132,7 @@ public record ChatRequest(
          * 此方法会将系统消息插入到列表头部，即使之前已有消息。</p>
          */
         public Builder system(String content) {
+            this.messages.removeIf(m -> m.role() == Role.SYSTEM);
             this.messages.add(0, new Message(Role.SYSTEM, content));
             return this;
         }

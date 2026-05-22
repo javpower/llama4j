@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Llama4j Agent</title>
+    <link rel="stylesheet" href="css/theme.css">
+    <link rel="stylesheet" href="css/layout.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/editor.css">
+    <!-- Monaco Editor -->
+    <link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/editor/editor.main.css">
+    <!-- xterm.js -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+    <!-- highlight.js -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/styles/vs2015.min.css">
+</head>
+<body>
+    <!-- Title Bar -->
+    <div id="titlebar">
+        <div class="titlebar-left">
+            <span class="titlebar-icon" id="titlebar-icon"></span>
+            <span class="titlebar-title">Llama4j Agent</span>
+        </div>
+        <div class="titlebar-center" id="workspace-name">No workspace open</div>
+        <div class="titlebar-right">
+            <select id="model-select" class="model-select">
+                <option value="">Loading models...</option>
+            </select>
+            <button id="btn-settings" class="titlebar-btn" title="Settings"></button>
+            <button id="btn-help" class="titlebar-btn" title="Help"></button>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div id="main-container">
+        <!-- Activity Bar -->
+        <div id="activity-bar">
+            <button class="activity-btn active" data-panel="explorer" title="Explorer (Ctrl+Shift+E)">
+                <span class="activity-icon" data-icon="explorer"></span>
+            </button>
+            <button class="activity-btn" data-panel="search" title="Search (Ctrl+Shift+F)">
+                <span class="activity-icon" data-icon="search"></span>
+            </button>
+            <button class="activity-btn" data-panel="git" title="Source Control (Ctrl+Shift+G)">
+                <span class="activity-icon" data-icon="git"></span>
+            </button>
+            <div class="activity-spacer"></div>
+            <button class="activity-btn" data-panel="agent" title="Agent Chat (Ctrl+Shift+A)">
+                <span class="activity-icon" data-icon="agent"></span>
+            </button>
+        </div>
+
+        <!-- Sidebar -->
+        <div id="sidebar">
+            <!-- Explorer Panel -->
+            <div class="sidebar-panel active" id="panel-explorer">
+                <div class="panel-header">
+                    <span>EXPLORER</span>
+                    <button class="panel-action" id="btn-refresh-tree" title="Refresh"></button>
+                </div>
+                <div class="panel-content" id="file-tree"></div>
+            </div>
+
+            <!-- Search Panel -->
+            <div class="sidebar-panel" id="panel-search">
+                <div class="panel-header">SEARCH</div>
+                <div class="panel-content">
+                    <div class="search-input-group">
+                        <input type="text" id="search-input" placeholder="Search files..." class="search-input">
+                        <input type="text" id="search-glob" placeholder="*.java" class="search-glob" title="File filter">
+                    </div>
+                    <div id="search-results"></div>
+                </div>
+            </div>
+
+            <!-- Git Panel -->
+            <div class="sidebar-panel" id="panel-git">
+                <div class="panel-header">
+                    <span>SOURCE CONTROL</span>
+                    <button class="panel-action" id="btn-refresh-git" title="Refresh"></button>
+                </div>
+                <div class="panel-content" id="git-panel"></div>
+            </div>
+
+            <!-- Agent Panel (sidebar toggle) -->
+            <div class="sidebar-panel" id="panel-agent">
+                <div class="panel-header">AGENT</div>
+                <div class="panel-content">
+                    <div id="agent-sessions-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Editor Area -->
+        <div id="editor-area">
+            <!-- Editor Tabs -->
+            <div id="editor-tabs"></div>
+
+            <!-- Editor Container -->
+            <div id="editor-container">
+                <!-- Welcome Tab -->
+                <div id="welcome-view" class="welcome-view">
+                    <div class="welcome-content">
+                        <h1>Llama4j Agent</h1>
+                        <p>AI-powered coding assistant</p>
+                        <div class="welcome-actions">
+                            <button id="btn-open-workspace" class="welcome-btn">
+                                Open Folder
+                            </button>
+                        </div>
+                        <div class="welcome-shortcuts">
+                            <h3>Keyboard Shortcuts</h3>
+                            <div class="shortcut-row"><kbd>Ctrl+P</kbd> Quick Open File</div>
+                            <div class="shortcut-row"><kbd>Ctrl+Shift+F</kbd> Global Search</div>
+                            <div class="shortcut-row"><kbd>Ctrl+`</kbd> Toggle Terminal</div>
+                            <div class="shortcut-row"><kbd>Ctrl+B</kbd> Toggle Sidebar</div>
+                            <div class="shortcut-row"><kbd>Ctrl+Shift+A</kbd> Agent Chat</div>
+                            <div class="shortcut-row"><kbd>Ctrl+S</kbd> Save File</div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Monaco Editor Mount Point -->
+                <div id="monaco-container" style="display:none;"></div>
+                <!-- Diff Editor Mount Point -->
+                <div id="diff-container" style="display:none;"></div>
+            </div>
+
+            <!-- Terminal Area -->
+            <div id="terminal-area">
+                <div id="terminal-tabs">
+                    <span class="terminal-tab active">Terminal</span>
+                    <button class="terminal-tab-btn" id="btn-new-terminal" title="New Terminal"></button>
+                    <div class="terminal-tab-spacer"></div>
+                    <button class="terminal-tab-btn" id="btn-close-terminal" title="Close Terminal"></button>
+                </div>
+                <div id="terminal-container"></div>
+            </div>
+        </div>
+
+        <!-- Agent Chat Panel -->
+        <div id="agent-panel">
+            <div class="agent-header">
+                <span class="agent-title"></span>
+                <div class="agent-actions">
+                    <button id="btn-new-chat" class="agent-btn" title="New Chat"></button>
+                    <button id="btn-toggle-agent" class="agent-btn" title="Close Panel"></button>
+                </div>
+            </div>
+            <div id="agent-messages"></div>
+            <div id="agent-input-area">
+                <textarea id="agent-input" placeholder="Ask me anything... (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
+                <button id="btn-send" class="send-btn" title="Send"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div id="statusbar">
+        <div class="statusbar-left">
+            <span id="status-branch" class="statusbar-item">main</span>
+            <span id="status-problems" class="statusbar-item">0 problems</span>
+        </div>
+        <div class="statusbar-right">
+            <span id="status-cursor" class="statusbar-item">Ln 1, Col 1</span>
+            <span id="status-encoding" class="statusbar-item">UTF-8</span>
+            <span id="status-indent" class="statusbar-item">Spaces: 4</span>
+            <span id="status-language" class="statusbar-item">Plain Text</span>
+        </div>
+    </div>
+
+    <!-- Workspace Dialog -->
+    <div id="workspace-dialog" class="dialog-overlay" style="display:none;">
+        <div class="dialog">
+            <div class="dialog-header">
+                <span>Open Workspace</span>
+                <button class="dialog-close" id="btn-close-dialog"></button>
+            </div>
+            <div class="dialog-body">
+                <input type="text" id="workspace-path-input" placeholder="/path/to/your/project" class="dialog-input">
+                <div class="dialog-hint">Enter the absolute path to your project directory</div>
+                <div id="recent-workspaces" class="recent-list"></div>
+            </div>
+            <div class="dialog-footer">
+                <button id="btn-cancel-dialog" class="dialog-btn">Cancel</button>
+                <button id="btn-confirm-workspace" class="dialog-btn primary">Open</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Permission Dialog -->
+    <div id="permission-dialog" class="dialog-overlay" style="display:none;">
+        <div class="dialog">
+            <div class="dialog-header">
+                <span>Tool Permission Required</span>
+            </div>
+            <div class="dialog-body">
+                <div id="permission-tool-name" class="permission-tool"></div>
+                <pre id="permission-args" class="permission-args"></pre>
+            </div>
+            <div class="dialog-footer">
+                <button id="btn-deny" class="dialog-btn danger">Deny</button>
+                <button id="btn-allow-once" class="dialog-btn">Allow Once</button>
+                <button id="btn-allow-always" class="dialog-btn primary">Always Allow</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Dialog -->
+    <div id="settings-dialog" class="dialog-overlay" style="display:none;">
+        <div class="dialog">
+            <div class="dialog-header">
+                <span>Settings</span>
+                <button class="dialog-close" onclick="Shortcuts.hideSettings()"></button>
+            </div>
+            <div class="dialog-body">
+                <div class="settings-row">
+                    <label>Current Model</label>
+                    <span id="settings-model">-</span>
+                </div>
+                <div class="settings-row">
+                    <label>Workspace</label>
+                    <span id="settings-workspace">-</span>
+                </div>
+                <div class="settings-row">
+                    <label>Theme</label>
+                    <span>Dark (default)</span>
+                </div>
+            </div>
+            <div class="dialog-footer">
+                <button class="dialog-btn primary" onclick="Shortcuts.hideSettings()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help Dialog -->
+    <div id="help-dialog" class="dialog-overlay" style="display:none;">
+        <div class="dialog">
+            <div class="dialog-header">
+                <span>Help & Shortcuts</span>
+                <button class="dialog-close" onclick="Shortcuts.hideHelp()"></button>
+            </div>
+            <div class="dialog-body">
+                <h3>Llama4j Agent</h3>
+                <p>AI-powered coding assistant with local and cloud model support.</p>
+                <h3>Keyboard Shortcuts</h3>
+                <div class="shortcut-row"><kbd>Ctrl+P</kbd> Quick Open File</div>
+                <div class="shortcut-row"><kbd>Ctrl+Shift+F</kbd> Global Search</div>
+                <div class="shortcut-row"><kbd>Ctrl+`</kbd> Toggle Terminal</div>
+                <div class="shortcut-row"><kbd>Ctrl+B</kbd> Toggle Sidebar</div>
+                <div class="shortcut-row"><kbd>Ctrl+Shift+A</kbd> Focus Agent Chat</div>
+                <div class="shortcut-row"><kbd>Ctrl+Shift+E</kbd> Explorer Panel</div>
+                <div class="shortcut-row"><kbd>Ctrl+Shift+G</kbd> Git Panel</div>
+                <div class="shortcut-row"><kbd>Ctrl+S</kbd> Save File</div>
+                <div class="shortcut-row"><kbd>Escape</kbd> Close Dialogs</div>
+                <h3>Tips</h3>
+                <ul>
+                    <li>Double-click files in explorer to open them</li>
+                    <li>Click git changed files to view diffs</li>
+                    <li>Agent can read, write, edit files and run commands</li>
+                    <li>Use the model selector to switch between models</li>
+                </ul>
+            </div>
+            <div class="dialog-footer">
+                <button class="dialog-btn primary" onclick="Shortcuts.hideHelp()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@14.0.0/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+
+    <!-- Monaco Editor Loader -->
+    <script>
+        var require = { paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.min.js"></script>
+
+    <!-- xterm.js -->
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
+
+    <!-- App Scripts -->
+    <script src="js/utils.js"></script>
+    <script src="js/icons.js"></script>
+    <script src="js/events.js"></script>
+    <script src="js/workspace.js"></script>
+    <script src="js/fileExplorer.js"></script>
+    <script src="js/editor.js"></script>
+    <script src="js/terminal.js"></script>
+    <script src="js/agent.js"></script>
+    <script src="js/git.js"></script>
+    <script src="js/search.js"></script>
+    <script src="js/models.js"></script>
+    <script src="js/shortcuts.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
