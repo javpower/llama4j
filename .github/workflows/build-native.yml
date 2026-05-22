@@ -30,31 +30,10 @@ env:
   JAVA_DISTRIBUTION: "temurin"
 
 jobs:
-  build-native:
-    name: ${{ matrix.classifier }} (${{ matrix.gpu_backend }})
-    if: ${{ matrix.enabled }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14
-            classifier: macos-aarch64
-            gpu_backend: metal
-            enabled: ${{ inputs.build_macos_aarch64 }}
-          - runner: macos-13
-            classifier: macos-x86_64
-            gpu_backend: metal
-            enabled: ${{ inputs.build_macos_x86_64 }}
-          - runner: ubuntu-22.04
-            classifier: linux-x86_64
-            gpu_backend: cuda
-            enabled: ${{ inputs.build_linux_x86_64 }}
-          - runner: windows-2022
-            classifier: windows-x86_64
-            gpu_backend: cuda
-            enabled: ${{ inputs.build_windows_x86_64 }}
-
+  build-macos-aarch64:
+    name: macos-aarch64 (metal)
+    if: ${{ inputs.build_macos_aarch64 }}
+    runs-on: macos-14
     steps:
       - name: Checkout llama4j
         uses: actions/checkout@v4
@@ -69,61 +48,146 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/llama.cpp
-          key: llama-cpp-${{ matrix.classifier }}-${{ matrix.gpu_backend }}-master
+          key: llama-cpp-macos-aarch64-metal-master
 
-      - name: Setup CUDA Toolkit (Linux/Windows)
-        if: matrix.gpu_backend == 'cuda'
+      - name: Build
+        run: |
+          chmod +x scripts/build-native.sh
+          ./scripts/build-native.sh \
+            --classifier macos-aarch64 \
+            --gpu metal \
+            --jobs $(sysctl -n hw.ncpu)
+
+      - name: Upload native libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-libs-macos-aarch64
+          path: llama4j-native/src/main/resources/native/macos-aarch64/
+          retention-days: 1
+
+  build-macos-x86_64:
+    name: macos-x86_64 (metal)
+    if: ${{ inputs.build_macos_x86_64 }}
+    runs-on: macos-13
+    steps:
+      - name: Checkout llama4j
+        uses: actions/checkout@v4
+
+      - name: Setup JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Cache llama.cpp build
+        uses: actions/cache@v4
+        with:
+          path: /tmp/llama.cpp
+          key: llama-cpp-macos-x86_64-metal-master
+
+      - name: Build
+        run: |
+          chmod +x scripts/build-native.sh
+          ./scripts/build-native.sh \
+            --classifier macos-x86_64 \
+            --gpu metal \
+            --jobs $(sysctl -n hw.ncpu)
+
+      - name: Upload native libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-libs-macos-x86_64
+          path: llama4j-native/src/main/resources/native/macos-x86_64/
+          retention-days: 1
+
+  build-linux-x86_64:
+    name: linux-x86_64 (cuda)
+    if: ${{ inputs.build_linux_x86_64 }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout llama4j
+        uses: actions/checkout@v4
+
+      - name: Setup JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Cache llama.cpp build
+        uses: actions/cache@v4
+        with:
+          path: /tmp/llama.cpp
+          key: llama-cpp-linux-x86_64-cuda-master
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake gcc g++
+
+      - name: Setup CUDA Toolkit
         uses: Jimver/cuda-toolkit@v0.2.19
         with:
           cuda: '12.6.2'
           method: 'network'
 
-      # ── macOS build ──
-      - name: Build (macOS)
-        if: runner.os == 'macOS'
+      - name: Build
         run: |
           chmod +x scripts/build-native.sh
           ./scripts/build-native.sh \
-            --classifier ${{ matrix.classifier }} \
-            --gpu ${{ matrix.gpu_backend }} \
-            --jobs $(sysctl -n hw.ncpu)
-
-      # ── Linux build ──
-      - name: Install dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake gcc g++
-
-      - name: Build (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          chmod +x scripts/build-native.sh
-          ./scripts/build-native.sh \
-            --classifier ${{ matrix.classifier }} \
-            --gpu ${{ matrix.gpu_backend }} \
+            --classifier linux-x86_64 \
+            --gpu cuda \
             --jobs $(nproc)
-
-      # ── Windows build ──
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          .\scripts\build-native.ps1 `
-            -Classifier ${{ matrix.classifier }} `
-            -Gpu ${{ matrix.gpu_backend }}
 
       - name: Upload native libraries
         uses: actions/upload-artifact@v4
         with:
-          name: native-libs-${{ matrix.classifier }}
-          path: llama4j-native/src/main/resources/native/${{ matrix.classifier }}/
+          name: native-libs-linux-x86_64
+          path: llama4j-native/src/main/resources/native/linux-x86_64/
+          retention-days: 1
+
+  build-windows-x86_64:
+    name: windows-x86_64 (cuda)
+    if: ${{ inputs.build_windows_x86_64 }}
+    runs-on: windows-2022
+    steps:
+      - name: Checkout llama4j
+        uses: actions/checkout@v4
+
+      - name: Setup JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Setup CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.19
+        with:
+          cuda: '12.6.2'
+          method: 'network'
+
+      - name: Build
+        shell: pwsh
+        run: |
+          .\scripts\build-native.ps1 `
+            -Classifier windows-x86_64 `
+            -Gpu cuda
+
+      - name: Upload native libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-libs-windows-x86_64
+          path: llama4j-native/src/main/resources/native/windows-x86_64/
           retention-days: 1
 
   package-java:
     name: Package Java JAR
     if: ${{ inputs.package_java }}
-    needs: build-native
+    needs:
+      - build-macos-aarch64
+      - build-macos-x86_64
+      - build-linux-x86_64
+      - build-windows-x86_64
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout llama4j
