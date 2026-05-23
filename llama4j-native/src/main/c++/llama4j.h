@@ -106,12 +106,13 @@ Java_com_llama4j_native_1_LlamaContext_tokenize(
  *
  * @param nativeHandle  模型会话指针
  * @param tokenId       token ID
- * @return              token 对应的文本片段
+ * @param tokens        token ID 数组
+ * @return              token 序列对应的文本
  */
 JNIEXPORT jstring JNICALL
-Java_com_llama4j_native_1_LlamaContext_tokenToStr(
+Java_com_llama4j_native_1_LlamaContext_detokenize(
     JNIEnv *env, jclass clazz,
-    jlong nativeHandle, jint tokenId);
+    jlong nativeHandle, jintArray tokens);
 
 /* ──────────────────────────────────────────────────────────────
  *  推理生成
@@ -356,6 +357,86 @@ Java_com_llama4j_native_1_LlamaContext_getModelSize(
 JNIEXPORT jlong JNICALL
 Java_com_llama4j_native_1_LlamaContext_getModelNParams(
     JNIEnv *env, jclass clazz, jlong nativeHandle);
+
+/* ──────────────────────────────────────────────────────────────
+ *  多模态（Vision-Language Model）支持
+ *  ────────────────────────────────────────────────────────────── */
+
+/**
+ * 初始化多模态上下文。
+ *
+ * 加载 mmproj（视觉投影器）权重并初始化 mtmd 上下文。
+ * mmprojPath 可以与模型路径相同（对于 projector 内嵌的 GGUF 模型），
+ * 也可以是单独的文件。
+ *
+ * @param nativeHandle  模型会话指针
+ * @param mmprojPath    mmproj 文件路径
+ */
+JNIEXPORT void JNICALL
+Java_com_llama4j_native_1_LlamaContext_initMultimodal(
+    JNIEnv *env, jclass clazz,
+    jlong nativeHandle, jstring mmprojPath);
+
+/**
+ * 查询多模态是否已启用。
+ *
+ * @param nativeHandle  模型会话指针
+ * @return              JNI_TRUE 已启用，JNI_FALSE 未启用
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_llama4j_native_1_LlamaContext_isMultimodalEnabled(
+    JNIEnv *env, jclass clazz, jlong nativeHandle);
+
+/** 释放多模态上下文 */
+JNIEXPORT void JNICALL
+Java_com_llama4j_native_1_LlamaContext_freeMultimodal(
+    JNIEnv *env, jclass clazz, jlong nativeHandle);
+
+/**
+ * 多模态同步生成。
+ *
+ * 内部流程：
+ *   1. 从 byte[][] 创建 mtmd_bitmap
+ *   2. mtmd_tokenize 将 prompt（含 <__media__> 标记）与图片交错编码
+ *   3. mtmd_helper_eval_chunks 将所有 chunks 送入 KV cache
+ *   4. autoregressive sampling loop 生成文本
+ *
+ * @param nativeHandle     模型会话指针
+ * @param prompt           包含 <__media__> 标记的提示词（已通过 chat template 渲染）
+ * @param imageDataArray   图片数据数组（byte[][]，支持多张图片）
+ * @param maxTokens        最大生成 token 数
+ * @param temperature      采样温度
+ * @param topK             Top-K 采样参数
+ * @param topP             Top-P 采样参数
+ * @param repeatPenalty    重复惩罚系数
+ * @param seed             随机种子
+ * @param stopToken        停止 token
+ * @return                 生成的文本
+ */
+JNIEXPORT jstring JNICALL
+Java_com_llama4j_native_1_LlamaContext_generateMultimodal(
+    JNIEnv *env, jclass clazz,
+    jlong nativeHandle, jstring prompt,
+    jobjectArray imageDataArray,
+    jint maxTokens, jfloat temperature,
+    jint topK, jfloat topP,
+    jfloat repeatPenalty, jlong seed,
+    jstring stopToken);
+
+/**
+ * 多模态流式生成，每生成一个 token 通过回调通知 Java 层。
+ *
+ * @param callback      Java 端的 TokenCallback 回调对象
+ */
+JNIEXPORT void JNICALL
+Java_com_llama4j_native_1_LlamaContext_generateMultimodalStream(
+    JNIEnv *env, jclass clazz,
+    jlong nativeHandle, jstring prompt,
+    jobjectArray imageDataArray,
+    jint maxTokens, jfloat temperature,
+    jint topK, jfloat topP,
+    jfloat repeatPenalty, jlong seed,
+    jstring stopToken, jobject callback);
 
 #ifdef __cplusplus
 }

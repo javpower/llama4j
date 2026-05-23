@@ -4,12 +4,17 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * OpenAI 兼容的聊天补全请求 — 请求体 DTO
  *
  * <p>镜像 OpenAI Chat Completion API 的请求格式，实现线级兼容。
- * 任何使用 OpenAI SDK 的客户端都可以直接对接 llama4j 服务。</p>
+ * 任何使用 OpenAI SDK 的客户端都可以直接对接 llama4j 服务。
+ * 支持多模态内容：content 字段既可以是纯文本字符串，
+ * 也可以是包含 text 和 image_url 类型的内容数组。</p>
  *
  * <h2>字段映射</h2>
  * <table>
@@ -35,16 +40,72 @@ public record ChatCompletionRequest(
     List<ToolSchema> tools
 ) {
 
-    /** 单条消息 */
+    /**
+     * 单条消息 — content 支持 String 或多模态内容数组。
+     *
+     * <p>当 content 是纯文本时，Jackson 反序列化为 String；
+     * 当 content 是数组时，反序列化为 List&lt;Map&gt;。
+     * textContent() 和 imageParts() 方法分别提取文本和图片内容。</p>
+     */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ChatMessage(
         String role,
-        String content,
+        Object content,
         @JsonProperty("tool_calls") List<ToolCallInfo> toolCalls,
         @JsonProperty("tool_call_id") String toolCallId
     ) {
         public ChatMessage(String role, String content) {
-            this(role, content, null, null);
+            this(role, (Object) content, null, null);
+        }
+
+        /** 提取文本内容（兼容 String 和 List 格式） */
+        @SuppressWarnings("unchecked")
+        public String textContent() {
+            if (content == null) return "";
+            if (content instanceof String s) return s;
+            if (content instanceof List<?> list) {
+                return list.stream()
+                    .filter(item -> item instanceof Map)
+                    .map(item -> (Map<String, Object>) item)
+                    .filter(m -> "text".equals(m.get("type")))
+                    .map(m -> m.get("text") != null ? m.get("text").toString() : "")
+                    .collect(Collectors.joining("\n"));
+            }
+            return content.toString();
+        }
+
+        /** 检查是否包含图片内容 */
+        @SuppressWarnings("unchecked")
+        public boolean hasImages() {
+            if (content instanceof List<?> list) {
+                return list.stream()
+                    .filter(item -> item instanceof Map)
+                    .map(item -> (Map<String, Object>) item)
+                    .anyMatch(m -> "image_url".equals(m.get("type")));
+            }
+            return false;
+        }
+
+        /** 提取图片 URL 列表 */
+        @SuppressWarnings("unchecked")
+        public List<String> imageUrls() {
+            if (content instanceof List<?> list) {
+                return list.stream()
+                    .filter(item -> item instanceof Map)
+                    .map(item -> (Map<String, Object>) item)
+                    .filter(m -> "image_url".equals(m.get("type")))
+                    .map(m -> {
+                        Object imageUrl = m.get("image_url");
+                        if (imageUrl instanceof Map) {
+                            Object url = ((Map<String, Object>) imageUrl).get("url");
+                            return url != null ? url.toString() : null;
+                        }
+                        return null;
+                    })
+                    .filter(Objects::nonNull)
+                    .toList();
+            }
+            return List.of();
         }
     }
 
@@ -82,7 +143,7 @@ public record ChatCompletionRequest(
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ParametersSchema(
         String type,
-        java.util.Map<String, PropertySchema> properties,
+        Map<String, PropertySchema> properties,
         List<String> required
     ) {}
 

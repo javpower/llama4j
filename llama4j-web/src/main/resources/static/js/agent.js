@@ -331,7 +331,7 @@ const Agent = {
         if (typeof marked === 'undefined') return escapeHtml(text);
         try {
             const html = marked.parse(text);
-            return typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
+            return typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : escapeHtml(text);
         } catch (e) {
             return escapeHtml(text);
         }

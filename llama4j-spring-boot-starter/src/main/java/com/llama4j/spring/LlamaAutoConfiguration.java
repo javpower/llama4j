@@ -99,6 +99,12 @@ public class LlamaAutoConfiguration {
             .nGpuLayers(mc.getNGpuLayers())
             .nThreads(mc.getNThreads())
             .build();
+
+        if (mc.getMmprojPath() != null && !mc.getMmprojPath().isBlank()) {
+            LOG.info("加载 VLM 模型: {} (mmproj={})", modelPath, mc.getMmprojPath());
+            return LocalModel.fromFileWithVision(modelPath, params, mc.getMmprojPath());
+        }
+
         LOG.info("加载本地模型: {} (nCtx={}, nGpuLayers={})", modelPath, mc.getNCtx(), mc.getNGpuLayers());
         return LocalModel.fromFile(modelPath, params);
     }
@@ -155,10 +161,10 @@ public class LlamaAutoConfiguration {
     @ConditionalOnProperty(prefix = "llama4j.api", name = "key")
     FilterRegistrationBean<ApiKeyFilter> apiKeyFilter(LlamaProperties props) {
         String key = props.getApi().getKey();
-        LOG.info("API 安全校验已启用");
+        LOG.info("API 安全校验已启用 (保护 /v1/* 和 /api/*)");
         FilterRegistrationBean<ApiKeyFilter> registration = new FilterRegistrationBean<>();
         registration.setFilter(new ApiKeyFilter(key));
-        registration.addUrlPatterns("/v1/*");
+        registration.addUrlPatterns("/v1/*", "/api/*");
         registration.setOrder(1);
         return registration;
     }

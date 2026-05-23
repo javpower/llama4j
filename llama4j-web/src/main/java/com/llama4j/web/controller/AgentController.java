@@ -19,23 +19,32 @@ import jakarta.annotation.PreDestroy;
 import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 @RestController
 @RequestMapping("/api/agent")
 public class AgentController {
 
     private static final Logger LOG = LoggerFactory.getLogger(AgentController.class);
+    private static final int MAX_CONCURRENT_STREAMS = 4;
 
     private final AgentSessionManager sessionManager;
     private final WorkspaceService workspaceService;
     private final CliAgent cliAgent;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "agent-stream");
-        t.setDaemon(true);
-        return t;
-    });
+    private final ExecutorService executor = new ThreadPoolExecutor(
+        1, MAX_CONCURRENT_STREAMS,
+        60L, TimeUnit.SECONDS,
+        new LinkedBlockingQueue<>(16),
+        r -> {
+            Thread t = new Thread(r, "agent-stream");
+            t.setDaemon(true);
+            return t;
+        },
+        new ThreadPoolExecutor.CallerRunsPolicy()
+    );
 
     public AgentController(AgentSessionManager sessionManager, WorkspaceService workspaceService, CliAgent cliAgent) {
         this.sessionManager = sessionManager;
@@ -84,7 +93,13 @@ public class AgentController {
                 if (sessionId != null) {
                     session = sessionManager.getSession(sessionId);
                 } else {
-                    String wsPath = workspaceService.getCurrentWorkspace().path();
+                    var ws = workspaceService.getCurrentWorkspace();
+                    if (ws == null) {
+                        sendEvent(emitter, "error", Map.of("message", "No active workspace. Please open a workspace first."));
+                        emitter.complete();
+                        return;
+                    }
+                    String wsPath = ws.path();
                     session = sessionManager.createSession(cliAgent, wsPath);
                 }
 
@@ -220,8 +235,11 @@ public class AgentController {
 
     @PostMapping("/session/new")
     public ResponseEntity<?> newSession() {
-        String wsPath = workspaceService.getCurrentWorkspace().path();
-        var session = sessionManager.createSession(cliAgent, wsPath);
+        var ws = workspaceService.getCurrentWorkspace();
+        if (ws == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No active workspace"));
+        }
+        var session = sessionManager.createSession(cliAgent, ws.path());
         return ResponseEntity.ok(Map.of("id", session.id()));
     }
 

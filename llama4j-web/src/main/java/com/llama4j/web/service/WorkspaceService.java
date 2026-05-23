@@ -74,7 +74,13 @@ public class WorkspaceService {
         if (ws == null) throw new IllegalStateException("No active workspace");
 
         Path root = Path.of(ws.path());
-        Path target = relativePath.isEmpty() ? root : root.resolve(relativePath);
+        Path target = relativePath.isEmpty() ? root : root.resolve(relativePath).normalize();
+
+        // Path traversal guard
+        if (!target.startsWith(root)) {
+            throw new IllegalArgumentException("Path outside workspace");
+        }
+
         List<String> dirs = new ArrayList<>();
 
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(target)) {

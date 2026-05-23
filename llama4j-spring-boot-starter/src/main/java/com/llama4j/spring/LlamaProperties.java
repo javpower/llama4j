@@ -75,6 +75,7 @@ public class LlamaProperties {
         private String apiKey;
         private String baseUrl;
         private String modelName;
+        private String mmprojPath;
 
         public String getName() { return name; }
         public void setName(String name) { this.name = name; }
@@ -96,6 +97,8 @@ public class LlamaProperties {
         public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
         public String getModelName() { return modelName; }
         public void setModelName(String modelName) { this.modelName = modelName; }
+        public String getMmprojPath() { return mmprojPath; }
+        public void setMmprojPath(String mmprojPath) { this.mmprojPath = mmprojPath; }
     }
 
     public static class InferenceConfig {

@@ -18,6 +18,7 @@
       --border: #38383a;
       --radius: 12px;
       --radius-lg: 18px;
+      --danger: #ff453a;
     }
 
     * {
@@ -126,7 +127,7 @@
     }
 
     .chat-item-delete:hover {
-      color: #ff453a;
+      color: var(--danger);
     }
 
     /* Main Content */
@@ -144,6 +145,12 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
 
     .header-title {
@@ -182,8 +189,24 @@
     }
 
     .status-dot.offline {
-      background: #ff453a;
-      box-shadow: 0 0 8px #ff453a;
+      background: var(--danger);
+      box-shadow: 0 0 8px var(--danger);
+    }
+
+    /* Model Selector */
+    .model-select {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .model-select:focus {
+      border-color: var(--accent);
     }
 
     /* Stream Toggle */
@@ -282,16 +305,39 @@
       color: var(--text-secondary);
     }
 
-    .message-content {
+    .message-body {
       padding-top: 4px;
+      max-width: 100%;
+    }
+
+    .message-content {
       font-size: 15px;
       line-height: 1.6;
       white-space: pre-wrap;
       word-break: break-word;
     }
 
-    .message.user .message-content {
+    .message.user .message-body {
       text-align: right;
+    }
+
+    .message-images {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .message-images.right {
+      justify-content: flex-end;
+    }
+
+    .message-images img {
+      max-width: 200px;
+      max-height: 200px;
+      border-radius: 8px;
+      object-fit: cover;
+      border: 1px solid var(--border);
     }
 
     /* Cursor */
@@ -316,12 +362,81 @@
       border-top: 1px solid var(--border);
     }
 
-    .input-wrapper {
+    .input-container {
       max-width: 800px;
       margin: 0 auto;
+    }
+
+    .image-preview-bar {
+      display: none;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+      padding: 8px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    .image-preview-bar.has-images {
       display: flex;
-      gap: 12px;
+    }
+
+    .image-preview-item {
+      position: relative;
+    }
+
+    .image-preview-item img {
+      width: 64px;
+      height: 64px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .image-preview-remove {
+      position: absolute;
+      top: -6px;
+      right: -6px;
+      width: 20px;
+      height: 20px;
+      background: var(--danger);
+      border: 2px solid var(--bg-primary);
+      border-radius: 50%;
+      color: white;
+      font-size: 11px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .input-wrapper {
+      display: flex;
+      gap: 8px;
       align-items: flex-end;
+    }
+
+    .attach-btn {
+      width: 52px;
+      height: 52px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text-secondary);
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+
+    .attach-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
     }
 
     .input-box {
@@ -432,7 +547,10 @@
 
   <div class="main">
     <header class="header">
-      <span class="header-title" id="currentChatTitle">新对话</span>
+      <div class="header-left">
+        <span class="header-title" id="currentChatTitle">新对话</span>
+        <select class="model-select" id="modelSelect" onchange="onModelChange()"></select>
+      </div>
       <div class="header-actions">
         <div class="stream-toggle">
           <span class="stream-label" id="streamLabel">流式</span>
@@ -446,21 +564,26 @@
     <div class="chat-area" id="chatArea">
       <div class="empty-state">
         <div class="empty-state-title">Llama4j Chat</div>
-        <div class="empty-state-subtitle">基于本地大语言模型的智能助手，支持多会话管理和上下文理解</div>
+        <div class="empty-state-subtitle">基于本地大语言模型的智能助手，支持多模态图片理解</div>
       </div>
     </div>
 
     <div class="input-area">
-      <div class="input-wrapper">
-        <textarea
-          class="input-box"
-          id="messageInput"
-          placeholder="输入消息... (Shift+Enter 换行)"
-          rows="1"
-          onkeydown="handleKeyDown(event)"
-          oninput="autoResize(this)"
-        ></textarea>
-        <button class="send-btn" id="sendBtn" onclick="sendMessage()">↑</button>
+      <div class="input-container">
+        <div class="image-preview-bar" id="imagePreviewBar"></div>
+        <div class="input-wrapper">
+          <button class="attach-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="上传图片">+</button>
+          <input type="file" id="fileInput" accept="image/*" multiple hidden onchange="handleFileSelect(event)">
+          <textarea
+            class="input-box"
+            id="messageInput"
+            placeholder="输入消息... (Shift+Enter 换行)"
+            rows="1"
+            onkeydown="handleKeyDown(event)"
+            oninput="autoResize(this)"
+          ></textarea>
+          <button class="send-btn" id="sendBtn" onclick="sendMessage()">&#x27A4;</button>
+        </div>
       </div>
     </div>
   </div>
@@ -470,22 +593,81 @@
     let chats = [];
     let currentChatId = null;
     let isStreamMode = true;
+    let selectedModel = '';
+    let pendingImages = []; // { dataUrl, base64, type }
 
-    function toggleStream() {
-      isStreamMode = !isStreamMode;
-      document.getElementById('streamToggle').classList.toggle('active', isStreamMode);
-      document.getElementById('streamLabel').classList.toggle('active', isStreamMode);
+    // ── Model Management ──
+
+    async function loadModels() {
+      try {
+        const res = await fetch('/v1/models');
+        const data = await res.json();
+        const select = document.getElementById('modelSelect');
+        select.innerHTML = '';
+        (data.models || []).forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = m.id + (m.default ? ' (default)' : '');
+          if (m.default) opt.selected = true;
+          select.appendChild(opt);
+        });
+        selectedModel = select.value;
+      } catch {
+        selectedModel = 'default';
+      }
     }
 
-    // Load chats from localStorage
+    function onModelChange() {
+      selectedModel = document.getElementById('modelSelect').value;
+    }
+
+    // ── Image Handling ──
+
+    function handleFileSelect(event) {
+      const files = event.target.files;
+      if (!files) return;
+      for (const file of files) {
+        if (!file.type.startsWith('image/')) continue;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const dataUrl = e.target.result;
+          const base64 = dataUrl.split(',')[1];
+          const type = file.type;
+          pendingImages.push({ dataUrl, base64, type });
+          renderImagePreviews();
+        };
+        reader.readAsDataURL(file);
+      }
+      event.target.value = '';
+    }
+
+    function removePendingImage(index) {
+      pendingImages.splice(index, 1);
+      renderImagePreviews();
+    }
+
+    function renderImagePreviews() {
+      const bar = document.getElementById('imagePreviewBar');
+      if (pendingImages.length === 0) {
+        bar.innerHTML = '';
+        bar.classList.remove('has-images');
+        return;
+      }
+      bar.classList.add('has-images');
+      bar.innerHTML = pendingImages.map((img, i) => `
+        <div class="image-preview-item">
+          <img src="${img.dataUrl}" alt="preview">
+          <button class="image-preview-remove" onclick="removePendingImage(${i})">&times;</button>
+        </div>
+      `).join('');
+    }
+
+    // ── Chat Persistence ──
+
     function loadChats() {
       const saved = localStorage.getItem('llama4j-chats');
       if (saved) {
-        try {
-          chats = JSON.parse(saved);
-        } catch {
-          chats = [];
-        }
+        try { chats = JSON.parse(saved); } catch { chats = []; }
       }
       if (chats.length === 0) {
         createNewChat();
@@ -525,7 +707,6 @@
     function loadChat(id) {
       const chat = chats.find(c => c.id === id);
       if (!chat) return;
-
       document.getElementById('currentChatTitle').textContent = chat.title || '新对话';
       renderMessages(chat.messages);
     }
@@ -535,24 +716,21 @@
       chats = chats.filter(c => c.id !== id);
       saveChats();
       renderChatList();
-
       if (currentChatId === id) {
-        if (chats.length > 0) {
-          selectChat(chats[0].id);
-        } else {
-          createNewChat();
-        }
+        if (chats.length > 0) selectChat(chats[0].id);
+        else createNewChat();
       }
     }
 
     function clearCurrentChat() {
       const chat = chats.find(c => c.id === currentChatId);
       if (!chat) return;
-
       chat.messages = [];
       saveChats();
       renderMessages([]);
     }
+
+    // ── Rendering ──
 
     function renderChatList() {
       const list = document.getElementById('chatList');
@@ -560,30 +738,38 @@
         <div class="chat-item ${chat.id === currentChatId ? 'active' : ''}" onclick="selectChat('${chat.id}')">
           <span class="chat-item-icon">💬</span>
           <span class="chat-item-title">${escapeHtml(chat.title || '新对话')}</span>
-          <button class="chat-item-delete" onclick="deleteChat('${chat.id}', event)">×</button>
+          <button class="chat-item-delete" onclick="deleteChat('${chat.id}', event)">x</button>
         </div>
       `).join('');
     }
 
     function renderMessages(messages) {
       const chatArea = document.getElementById('chatArea');
-
       if (messages.length === 0) {
         chatArea.innerHTML = `
           <div class="empty-state">
             <div class="empty-state-title">Llama4j Chat</div>
-            <div class="empty-state-subtitle">基于本地大语言模型的智能助手，支持多会话管理和上下文理解</div>
+            <div class="empty-state-subtitle">基于本地大语言模型的智能助手，支持多模态图片理解</div>
           </div>
         `;
         return;
       }
 
-      chatArea.innerHTML = messages.map(msg => `
-        <div class="message ${msg.role}">
-          <div class="message-avatar">${msg.role === 'user' ? 'U' : 'AI'}</div>
-          <div class="message-content">${escapeHtml(msg.content)}</div>
-        </div>
-      `).join('');
+      chatArea.innerHTML = messages.map(msg => {
+        const isUser = msg.role === 'user';
+        const imagesHtml = (msg.images && msg.images.length > 0)
+          ? `<div class="message-images ${isUser ? 'right' : ''}">${msg.images.map(src => `<img src="${src}" alt="image">`).join('')}</div>`
+          : '';
+        return `
+          <div class="message ${msg.role}">
+            <div class="message-avatar">${isUser ? 'U' : 'AI'}</div>
+            <div class="message-body">
+              ${imagesHtml}
+              <div class="message-content">${escapeHtml(msg.content)}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
 
       chatArea.scrollTop = chatArea.scrollHeight;
     }
@@ -594,9 +780,7 @@
       return div.innerHTML;
     }
 
-    function getCurrentChat() {
-      return chats.find(c => c.id === currentChatId);
-    }
+    // ── Input Helpers ──
 
     function autoResize(el) {
       el.style.height = 'auto';
@@ -610,47 +794,111 @@
       }
     }
 
+    // ── Build OpenAI-compatible message ──
+
+    function buildMessageContent(text, images) {
+      if (!images || images.length === 0) {
+        return text;
+      }
+      // Multimodal content array
+      const parts = [];
+      images.forEach(img => {
+        parts.push({ type: 'image_url', image_url: { url: `data:${img.type};base64,${img.base64}` } });
+      });
+      if (text) {
+        parts.push({ type: 'text', text: text });
+      }
+      return parts;
+    }
+
+    // ── Send Message ──
+
+    function getCurrentChat() {
+      return chats.find(c => c.id === currentChatId);
+    }
+
     async function sendMessage() {
-      const message = messageInput.value.trim();
-      if (!message) return;
+      const text = documentInput().value.trim();
+      const images = [...pendingImages];
+      if (!text && images.length === 0) return;
 
       const chat = getCurrentChat();
       if (!chat) return;
 
-      chat.messages.push({ role: 'user', content: message });
+      // Save user message with image previews
+      const msgData = { role: 'user', content: text || '(image)', images: images.map(i => i.dataUrl) };
+      chat.messages.push(msgData);
 
       if (chat.messages.length === 1) {
-        chat.title = message.slice(0, 30) + (message.length > 30 ? '...' : '');
+        chat.title = (text || '图片消息').slice(0, 30);
         document.getElementById('currentChatTitle').textContent = chat.title;
       }
 
-      messageInput.value = '';
-      messageInput.style.height = 'auto';
+      // Clear input
+      documentInput().value = '';
+      documentInput().style.height = 'auto';
+      pendingImages = [];
+      renderImagePreviews();
 
       renderMessages(chat.messages);
       saveChats();
       renderChatList();
 
-      sendBtn.disabled = true;
+      setSendBtn(false);
 
-      if (isStreamMode) {
-        await streamResponse(chat);
-      } else {
-        await blockingResponse(chat);
+      try {
+        if (isStreamMode) {
+          await streamResponse(chat, text, images);
+        } else {
+          await blockingResponse(chat, text, images);
+        }
+      } finally {
+        setSendBtn(true);
+        documentInput().focus();
       }
-
-      sendBtn.disabled = false;
-      messageInput.focus();
     }
 
-    async function streamResponse(chat) {
+    function documentInput() { return document.getElementById('messageInput'); }
+    function setSendBtn(enabled) { document.getElementById('sendBtn').disabled = !enabled; }
+
+    // ── Build API request body ──
+
+    function buildRequestBody(chatMessages, text, images, stream) {
+      const openaiMessages = chatMessages.map(m => {
+        if (m.images && m.images.length > 0) {
+          // Reconstruct multimodal content from stored message
+          const parts = [];
+          m.images.forEach(src => {
+            const base64 = src.split(',')[1];
+            const typeMatch = src.match(/data:(image\/\w+);/);
+            const imgType = typeMatch ? typeMatch[1] : 'image/png';
+            parts.push({ type: 'image_url', image_url: { url: `data:${imgType};base64,${base64}` } });
+          });
+          if (m.content && m.content !== '(image)') {
+            parts.push({ type: 'text', text: m.content });
+          }
+          return { role: m.role, content: parts };
+        }
+        return { role: m.role, content: m.content };
+      });
+
+      return {
+        model: selectedModel,
+        messages: openaiMessages,
+        stream: stream
+      };
+    }
+
+    // ── Streaming Response ──
+
+    async function streamResponse(chat, text, images) {
       const chatArea = document.getElementById('chatArea');
 
       const msgEl = document.createElement('div');
       msgEl.className = 'message assistant';
       msgEl.innerHTML = `
         <div class="message-avatar">AI</div>
-        <div class="message-content"></div>
+        <div class="message-body"><div class="message-content"></div></div>
       `;
       chatArea.appendChild(msgEl);
 
@@ -658,30 +906,21 @@
       const cursor = document.createElement('span');
       cursor.className = 'cursor';
       contentEl.appendChild(cursor);
-
       chatArea.scrollTop = chatArea.scrollHeight;
 
       try {
-        const openaiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
-
+        const body = buildRequestBody(chat.messages, text, images, true);
         const response = await fetch('/v1/chat/completions', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'text/event-stream'
-          },
-          body: JSON.stringify({
-            model: 'default',
-            messages: openaiMessages,
-            stream: true
-          })
+          headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+          body: JSON.stringify(body)
         });
 
         if (!response.ok) {
           const error = await response.text();
           cursor.remove();
-          contentEl.textContent = `错误: ${error}`;
-          chat.messages.push({ role: 'assistant', content: `错误: ${error}` });
+          contentEl.textContent = `Error: ${error}`;
+          chat.messages.push({ role: 'assistant', content: `Error: ${error}` });
           return;
         }
 
@@ -701,18 +940,17 @@
           for (const line of lines) {
             if (!line.startsWith('data:')) continue;
             const data = line.slice(5).trim();
-            if (data === '[DONE]') continue;
-            if (data === '') continue;
+            if (data === '[DONE]' || data === '') continue;
             try {
               const json = JSON.parse(data);
-              const content = json.choices?.[0]?.delta?.content;
-              if (content) {
-                fullContent += content;
+              const token = json.choices?.[0]?.delta?.content;
+              if (token) {
+                fullContent += token;
                 contentEl.textContent = fullContent;
                 contentEl.appendChild(cursor);
                 chatArea.scrollTop = chatArea.scrollHeight;
               }
-            } catch (e) { console.error('Parse error:', e, data); }
+            } catch (e) { /* skip */ }
           }
         }
 
@@ -725,44 +963,38 @@
 
       } catch (err) {
         cursor.remove();
-        contentEl.textContent = `网络错误: ${err.message}`;
-        chat.messages.push({ role: 'assistant', content: `网络错误: ${err.message}` });
+        contentEl.textContent = `Network error: ${err.message}`;
+        chat.messages.push({ role: 'assistant', content: `Network error: ${err.message}` });
       }
     }
 
-    async function blockingResponse(chat) {
+    // ── Blocking Response ──
+
+    async function blockingResponse(chat, text, images) {
       const chatArea = document.getElementById('chatArea');
 
       const loadingEl = document.createElement('div');
       loadingEl.className = 'message assistant';
       loadingEl.innerHTML = `
         <div class="message-avatar">AI</div>
-        <div class="message-content" style="color: var(--text-secondary)">思考中...</div>
+        <div class="message-body"><div class="message-content" style="color: var(--text-secondary)">Thinking...</div></div>
       `;
       chatArea.appendChild(loadingEl);
       chatArea.scrollTop = chatArea.scrollHeight;
 
       try {
-        const openaiMessages = chat.messages.map(m => ({ role: m.role, content: m.content }));
-
+        const body = buildRequestBody(chat.messages, text, images, false);
         const response = await fetch('/v1/chat/completions', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify({
-            model: 'default',
-            messages: openaiMessages,
-            stream: false
-          })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
         });
 
         loadingEl.remove();
 
         if (!response.ok) {
           const error = await response.text();
-          chat.messages.push({ role: 'assistant', content: `错误: ${error}` });
+          chat.messages.push({ role: 'assistant', content: `Error: ${error}` });
         } else {
           const json = await response.json();
           const content = json.choices?.[0]?.message?.content || '';
@@ -774,11 +1006,13 @@
 
       } catch (err) {
         loadingEl.remove();
-        chat.messages.push({ role: 'assistant', content: `网络错误: ${err.message}` });
+        chat.messages.push({ role: 'assistant', content: `Network error: ${err.message}` });
         saveChats();
         renderMessages(chat.messages);
       }
     }
+
+    // ── Health Check ──
 
     async function checkHealth() {
       try {
@@ -789,6 +1023,8 @@
       }
     }
 
+    // ── Init ──
+    loadModels();
     loadChats();
     checkHealth();
     setInterval(checkHealth, 30000);

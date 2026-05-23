@@ -81,7 +81,7 @@ CMAKE_ARGS=(
     -DBUILD_SHARED_LIBS=ON
     -DLLAMA_BUILD_TESTS=OFF
     -DLLAMA_BUILD_EXAMPLES=OFF
-    -DLLAMA_BUILD_TOOLS=OFF
+    -DLLAMA_BUILD_TOOLS=ON
     -DLLAMA_BUILD_SERVER=OFF
     -DLLAMA_BUILD_COMMON=ON
 )
@@ -126,6 +126,7 @@ mkdir -p "$OUTPUT_DIR"
 if [[ "$CLASSIFIER" == macos-* ]]; then
     cp -L "$LLAMA_CPP_DIR/build/bin/"libggml*.dylib "$OUTPUT_DIR/" 2>/dev/null || true
     cp -L "$LLAMA_CPP_DIR/build/bin/"libllama*.dylib "$OUTPUT_DIR/" 2>/dev/null || true
+    cp -L "$LLAMA_CPP_DIR/build/bin/"libmtmd*.dylib "$OUTPUT_DIR/" 2>/dev/null || true
 
     # 只保留非版本化的库文件名
     cd "$OUTPUT_DIR"
@@ -141,17 +142,20 @@ if [[ "$CLASSIFIER" == macos-* ]]; then
         -I"$JAVA_HOME/include/darwin" \
         -I"$LLAMA_CPP_DIR/include" \
         -I"$LLAMA_CPP_DIR/ggml/include" \
+        -I"$LLAMA_CPP_DIR/tools/mtmd" \
         -o "$OUTPUT_DIR/libllama4j.dylib" \
         "$PROJECT_DIR/llama4j-native/src/main/c++/llama4j.cpp" \
         -L"$LLAMA_CPP_DIR/build/bin" \
         -lllama -lllama-common \
-        -lggml -lggml-base -lggml-cpu -lggml-metal \
+        -lmtmd \
+        -lggml -lggml-base -lggml-cpu -lggml-blas -lggml-metal \
         -framework Metal -framework Foundation -framework MetalKit \
         -install_name @rpath/libllama4j.dylib
 
 elif [[ "$CLASSIFIER" == linux-* ]]; then
     cp -L "$LLAMA_CPP_DIR/build/bin/"libggml*.so* "$OUTPUT_DIR/" 2>/dev/null || true
     cp -L "$LLAMA_CPP_DIR/build/bin/"libllama*.so* "$OUTPUT_DIR/" 2>/dev/null || true
+    cp -L "$LLAMA_CPP_DIR/build/bin/"libmtmd*.so* "$OUTPUT_DIR/" 2>/dev/null || true
 
     # 只保留非版本化的库文件名
     cd "$OUTPUT_DIR"
@@ -160,7 +164,7 @@ elif [[ "$CLASSIFIER" == linux-* ]]; then
     done
     cd - > /dev/null
 
-    LINK_LIBS="-lllama -lllama-common -lggml -lggml-base -lggml-cpu"
+    LINK_LIBS="-lllama -lllama-common -lmtmd -lggml -lggml-base -lggml-cpu"
     EXTRA_LINK_DIRS=""
 
     if [[ "$GPU_BACKEND" == "cuda" ]]; then
@@ -176,6 +180,7 @@ elif [[ "$CLASSIFIER" == linux-* ]]; then
         -I"$JAVA_HOME/include/linux" \
         -I"$LLAMA_CPP_DIR/include" \
         -I"$LLAMA_CPP_DIR/ggml/include" \
+        -I"$LLAMA_CPP_DIR/tools/mtmd" \
         -o "$OUTPUT_DIR/libllama4j.so" \
         "$PROJECT_DIR/llama4j-native/src/main/c++/llama4j.cpp" \
         -L"$LLAMA_CPP_DIR/build/bin" \
@@ -189,5 +194,29 @@ echo "[4/4] 验证编译产物..."
 echo ""
 echo "输出文件:"
 ls -lh "$OUTPUT_DIR/"
+echo ""
+
+# 验证关键库文件存在
+missing=0
+for lib in libllama libggml libllama4j; do
+    if [[ "$CLASSIFIER" == macos-* ]]; then
+        [[ ! -f "$OUTPUT_DIR/${lib}.dylib" ]] && echo "WARNING: ${lib}.dylib 未找到!" && missing=1
+    elif [[ "$CLASSIFIER" == linux-* ]]; then
+        [[ ! -f "$OUTPUT_DIR/${lib}.so" ]] && echo "WARNING: ${lib}.so 未找到!" && missing=1
+    fi
+done
+
+# 验证 mtmd（多模态库）
+if [[ "$CLASSIFIER" == macos-* ]]; then
+    [[ ! -f "$OUTPUT_DIR/libmtmd.dylib" ]] && echo "WARNING: libmtmd.dylib 未找到，多模态功能不可用" && missing=1
+elif [[ "$CLASSIFIER" == linux-* ]]; then
+    [[ ! -f "$OUTPUT_DIR/libmtmd.so" ]] && echo "WARNING: libmtmd.so 未找到，多模态功能不可用" && missing=1
+fi
+
+if [[ $missing -eq 1 ]]; then
+    echo ""
+    echo "WARNING: 部分库文件缺失，请检查 llama.cpp 编译配置"
+fi
+
 echo ""
 echo "编译完成！"

@@ -151,6 +151,25 @@ public final class LlamaContext implements AutoCloseable {
     /** 生成文本嵌入向量 */
     private static native float[] embed(long nativeHandle, String text);
 
+    /** 初始化多模态（mtmd）上下文 */
+    private static native void initMultimodal(long nativeHandle, String mmprojPath);
+
+    /** 释放多模态（mtmd）上下文 */
+    private static native void freeMultimodal(long nativeHandle);
+
+    /** 查询多模态是否已启用 */
+    private static native boolean isMultimodalEnabled(long nativeHandle);
+
+    /** 多模态同步生成 */
+    private static native String generateMultimodal(long nativeHandle, String prompt,
+        byte[][] imageDataArray, int maxTokens, float temperature, int topK, float topP,
+        float repeatPenalty, long seed, String stopToken);
+
+    /** 多模态流式生成 */
+    private static native void generateMultimodalStream(long nativeHandle, String prompt,
+        byte[][] imageDataArray, int maxTokens, float temperature, int topK, float topP,
+        float repeatPenalty, long seed, String stopToken, TokenCallback callback);
+
     /** 获取模型描述 */
     private static native String getModelDesc(long nativeHandle);
 
@@ -207,20 +226,20 @@ public final class LlamaContext implements AutoCloseable {
             ? params.stopTokens().get(0) : null;
 
         GrammarConstraint grammar = resolveGrammar(params);
+        long grammarHandle = grammar != null ? grammar.handle() : 0;
         try {
             if (grammar != null) {
                 return generateWithGrammar(nativeHandle, params.prompt(), params.maxTokens(),
                     params.temperature(), params.topK(), params.topP(),
-                    params.repeatPenalty(), params.seed(), stopToken, grammar.handle());
+                    params.repeatPenalty(), params.seed(), stopToken, grammarHandle);
             }
             return generate(nativeHandle, params.prompt(), params.maxTokens(),
                 params.temperature(), params.topK(), params.topP(),
                 params.repeatPenalty(), params.seed(), stopToken);
         } finally {
-            // 如果是 jsonMode 自动创建的临时 grammar，用完关闭
-            if (grammar != null && params.grammar() == null) {
-                grammar.close();
-            }
+            // grammar sampler 已被 generateWithGrammar 内部的 sampler chain 释放，
+            // 这里只需处理用户显式传入的 grammar（非 jsonMode 自动创建的）
+            // 不再调用 grammar.close()，避免 double-free
         }
     }
 
@@ -262,9 +281,7 @@ public final class LlamaContext implements AutoCloseable {
                     params.repeatPenalty(), params.seed(), stopToken, callback);
             }
         } finally {
-            if (grammar != null && params.grammar() == null) {
-                grammar.close();
-            }
+            // grammar sampler 已被 chain 释放，不再 close
         }
     }
 
@@ -394,6 +411,37 @@ public final class LlamaContext implements AutoCloseable {
     }
 
     /* ──────────────────────────────────────────
+     *  公开 API — 多模态（Vision-Language）
+     *  ────────────────────────────────────────── */
+
+    /**
+     * 启用多模态支持。
+     *
+     * <p>加载 mmproj（视觉投影器）权重并初始化 mtmd 上下文。
+     * mmprojPath 可以与模型路径相同（对于 projector 内嵌的 GGUF 模型），
+     * 也可以是单独的文件路径。</p>
+     *
+     * @param mmprojPath mmproj 文件路径（通常与模型路径相同）
+     * @return 多模态上下文，用于多模态推理调用
+     */
+    public MultimodalContext enableMultimodal(String mmprojPath) {
+        ensureOpen();
+        LOG.info("正在初始化多模态上下文: {}", mmprojPath);
+        initMultimodal(nativeHandle, mmprojPath);
+        return new MultimodalContext(this);
+    }
+
+    /**
+     * 查询多模态是否已启用。
+     *
+     * @return true 如果已初始化 mtmd 上下文
+     */
+    public boolean isMultimodalEnabled() {
+        ensureOpen();
+        return isMultimodalEnabled(nativeHandle);
+    }
+
+    /* ──────────────────────────────────────────
      *  公开 API — 扩展元数据
      *  ────────────────────────────────────────── */
 
@@ -463,6 +511,34 @@ public final class LlamaContext implements AutoCloseable {
     private void ensureOpen() {
         if (closed.get()) {
             throw new IllegalStateException("LlamaContext 已关闭，不能再使用");
+        }
+    }
+
+    /** 包级访问：供 MultimodalContext 获取原生句柄 */
+    long handle() {
+        return nativeHandle;
+    }
+
+    /** 包级访问：多模态同步生成 */
+    static String doGenerateMultimodal(long handle, String prompt, byte[][] images,
+        int maxTokens, float temperature, int topK, float topP,
+        float repeatPenalty, long seed, String stopToken) {
+        return generateMultimodal(handle, prompt, images, maxTokens, temperature,
+            topK, topP, repeatPenalty, seed, stopToken);
+    }
+
+    /** 包级访问：多模态流式生成 */
+    static void doGenerateMultimodalStream(long handle, String prompt, byte[][] images,
+        int maxTokens, float temperature, int topK, float topP,
+        float repeatPenalty, long seed, String stopToken, TokenCallback callback) {
+        generateMultimodalStream(handle, prompt, images, maxTokens, temperature,
+            topK, topP, repeatPenalty, seed, stopToken, callback);
+    }
+
+    /** 包级访问：释放多模态上下文 */
+    static void doFreeMultimodal(long handle) {
+        if (handle != 0) {
+            freeMultimodal(handle);
         }
     }
 

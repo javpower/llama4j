@@ -30,7 +30,14 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
-        String wsPath = workspaceService.getCurrentWorkspace().path();
+        var ws = workspaceService.getCurrentWorkspace();
+        if (ws == null) {
+            try {
+                session.close(new CloseStatus(1013, "No active workspace"));
+            } catch (Exception ignored) {}
+            return;
+        }
+        String wsPath = ws.path();
         String termId = terminalService.createSession(wsPath);
         sessionTerminals.put(session, termId);
 
@@ -90,6 +97,11 @@ public class TerminalWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         String termId = sessionTerminals.remove(session);
         if (termId != null) {
+            // Force destroy process to unblock reader thread
+            Process process = terminalService.getProcess(termId);
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
             terminalService.closeSession(termId);
             LOG.info("Terminal WebSocket disconnected: {}", termId);
         }

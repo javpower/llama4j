@@ -51,9 +51,13 @@ public class RunCommandTool {
             }
             sb.append(output.isEmpty() ? "(no output)" : output);
             return sb.toString();
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException e) {
             LOG.error("Failed to run command: {}", command, e);
             return "Error executing command: " + e.getMessage();
+        } catch (InterruptedException e) {
+            LOG.error("Command interrupted: {}", command, e);
+            Thread.currentThread().interrupt();
+            return "Command interrupted: " + e.getMessage();
         }
     }
 }

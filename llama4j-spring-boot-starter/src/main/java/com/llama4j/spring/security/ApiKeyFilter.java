@@ -15,7 +15,7 @@ import java.security.NoSuchAlgorithmException;
 /**
  * API Key 安全校验过滤器 — Bearer Token 认证
  *
- * <p>对 {@code /v1/**} 路径下的请求进行 API Key 校验。
+ * <p>对 {@code /v1/**} 和 {@code /api/**} 路径下的请求进行 API Key 校验。
  * 客户端需在请求头中携带 {@code Authorization: Bearer <api-key>}。</p>
  *
  * <p>如果未配置 {@code llama4j.api.key}，则不启用校验（开发模式）。</p>
@@ -36,8 +36,8 @@ public class ApiKeyFilter extends OncePerRequestFilter {
                                     FilterChain filterChain) throws ServletException, IOException {
         String path = request.getRequestURI();
 
-        // 只对 /v1/ 路径做校验
-        if (!path.startsWith("/v1/")) {
+        // 对 /v1/ 和 /api/ 路径做校验
+        if (!path.startsWith("/v1/") && !path.startsWith("/api/")) {
             filterChain.doFilter(request, response);
             return;
         }

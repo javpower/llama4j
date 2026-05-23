@@ -6,6 +6,10 @@ spring:
     name: llama4j-web-agent
 
 llama4j:
+  web:
+    cors:
+      allowed-origins: http://localhost:8080, http://127.0.0.1:8080
+
   default-model: deepseek
   models:
     # 本地模型
@@ -18,7 +22,7 @@ llama4j:
     # OpenAI 兼容云端模型
     - name: deepseek
       type: openai
-      api-key: ${LLAMA4J_API_KEY:your-api-key-here}
+      api-key: ${LLAMA4J_API_KEY:CHANGE_ME_IN_PRODUCTION}
       base-url: https://api.minimaxi.com/v1
       model-name: MiniMax-M2.7
 

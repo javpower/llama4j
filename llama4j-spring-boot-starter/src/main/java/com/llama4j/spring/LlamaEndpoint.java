@@ -2,6 +2,7 @@ package com.llama4j.spring;
 
 import com.llama4j.chat.Role;
 import com.llama4j.core.*;
+import com.llama4j.native_.ImageData;
 import com.llama4j.spring.model.ChatCompletionRequest;
 import com.llama4j.spring.model.ChatCompletionResponse;
 import com.llama4j.tools.ReActAgent;
@@ -20,12 +21,14 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @RestController
 @RequestMapping("/v1")
 public class LlamaEndpoint {
 
     private static final Logger LOG = LoggerFactory.getLogger(LlamaEndpoint.class);
+    private static final AtomicInteger STREAM_COUNTER = new AtomicInteger();
 
     private final ModelRegistry modelRegistry;
     private final ToolRegistry toolRegistry;
@@ -34,7 +37,7 @@ public class LlamaEndpoint {
 
     private final ExecutorService streamExecutor = Executors.newFixedThreadPool(
         Runtime.getRuntime().availableProcessors() * 2, r -> {
-            Thread t = new Thread(r, "llama4j-stream");
+            Thread t = new Thread(r, "llama4j-stream-" + STREAM_COUNTER.incrementAndGet());
             t.setDaemon(true);
             return t;
         });
@@ -256,11 +259,27 @@ public class LlamaEndpoint {
     private ChatRequest convertRequest(ChatCompletionRequest request) {
         ChatRequest.Builder builder = ChatRequest.builder();
 
+        List<ImageData> allImages = new ArrayList<>();
+
         if (request.messages() != null) {
             for (ChatCompletionRequest.ChatMessage msg : request.messages()) {
                 Role role = Role.fromValue(msg.role());
-                builder.addMessage(role, msg.content());
+                String text = msg.textContent();
+                builder.addMessage(role, text != null ? text : "");
+
+                // 提取图片数据
+                for (String url : msg.imageUrls()) {
+                    byte[] imageBytes = resolveImageBytes(url);
+                    if (imageBytes != null) {
+                        String mediaType = extractMediaType(url);
+                        allImages.add(new ImageData(imageBytes, mediaType));
+                    }
+                }
             }
+        }
+
+        if (!allImages.isEmpty()) {
+            builder.images(allImages);
         }
 
         LlamaProperties.InferenceConfig defaults = properties.getInference();
@@ -271,5 +290,37 @@ public class LlamaEndpoint {
         builder.repeatPenalty(defaults.getRepeatPenalty());
 
         return builder.build();
+    }
+
+    /** 从 URL 或 data URI 解码图片字节数据 */
+    private byte[] resolveImageBytes(String url) {
+        if (url == null || url.isBlank()) return null;
+
+        if (url.startsWith("data:")) {
+            int commaIdx = url.indexOf(',');
+            if (commaIdx > 0 && commaIdx < url.length()) {
+                try {
+                    return Base64.getDecoder().decode(url.substring(commaIdx + 1));
+                } catch (IllegalArgumentException e) {
+                    LOG.warn("Base64 解码失败: {}", e.getMessage());
+                    return null;
+                }
+            }
+            return null;
+        }
+
+        LOG.warn("HTTP 图片 URL 暂不支持，请使用 base64 data URI: {}", url.substring(0, Math.min(50, url.length())));
+        return null;
+    }
+
+    /** 从 data URI 中提取 media type，如 "image/png" */
+    private String extractMediaType(String url) {
+        if (url != null && url.startsWith("data:")) {
+            int semiIdx = url.indexOf(';');
+            if (semiIdx > 5) {
+                return url.substring(5, semiIdx);
+            }
+        }
+        return "image/jpeg";
     }
 }

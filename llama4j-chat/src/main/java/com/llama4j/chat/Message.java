@@ -1,6 +1,7 @@
 package com.llama4j.chat;
 
 import com.llama4j.chat.content.ContentBlock;
+import com.llama4j.chat.content.ImageBlock;
 import com.llama4j.chat.content.TextBlock;
 import com.llama4j.chat.content.ToolUseBlock;
 import com.llama4j.chat.content.ToolResultBlock;
@@ -69,5 +70,23 @@ public record Message(Role role, String content, List<ContentBlock> blocks,
 
     public boolean hasToolResult() {
         return blocks.stream().anyMatch(b -> b instanceof ToolResultBlock);
+    }
+
+    public boolean hasImages() {
+        return blocks.stream().anyMatch(b -> b instanceof ImageBlock);
+    }
+
+    public List<ImageBlock> imageBlocks() {
+        return blocks.stream()
+            .filter(b -> b instanceof ImageBlock)
+            .map(b -> (ImageBlock) b)
+            .toList();
+    }
+
+    public static Message multimodal(Role role, String text, List<ImageBlock> images) {
+        List<ContentBlock> blocks = new java.util.ArrayList<>();
+        if (text != null && !text.isBlank()) blocks.add(new TextBlock(text));
+        if (images != null) blocks.addAll(images);
+        return of(role, blocks);
     }
 }

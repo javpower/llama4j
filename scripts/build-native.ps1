@@ -59,7 +59,7 @@ $cmakeArgs = @(
     "-DBUILD_SHARED_LIBS=ON",
     "-DLLAMA_BUILD_TESTS=OFF",
     "-DLLAMA_BUILD_EXAMPLES=OFF",
-    "-DLLAMA_BUILD_TOOLS=OFF",
+    "-DLLAMA_BUILD_TOOLS=ON",
     "-DLLAMA_BUILD_SERVER=OFF",
     "-DLLAMA_BUILD_COMMON=ON"
 )
@@ -82,6 +82,7 @@ if (-not (Test-Path $binDir)) { $binDir = Join-Path $LlamaCppDir "build\bin" }
 # Copy llama.cpp DLLs
 Copy-Item "$binDir\ggml*.dll" $OutputDir -ErrorAction SilentlyContinue
 Copy-Item "$binDir\llama*.dll" $OutputDir -ErrorAction SilentlyContinue
+Copy-Item "$binDir\mtmd*.dll" $OutputDir -ErrorAction SilentlyContinue
 
 $javaHome = $env:JAVA_HOME
 if (-not $javaHome) { $javaHome = (Get-Command java).Source | Split-Path | Split-Path }

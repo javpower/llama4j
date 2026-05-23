@@ -7,11 +7,17 @@
       "description": "llama4j 配置属性"
     },
     {
-      "name": "llama4j.model",
-      "type": "com.llama4j.spring.LlamaProperties$ModelConfig",
+      "name": "llama4j.api",
+      "type": "com.llama4j.spring.LlamaProperties$ApiConfig",
+      "sourceType": "com.llama4j.spring.LlamaProperties$ApiConfig",
+      "sourceMethod": "getApi()",
+      "description": "API 安全配置"
+    },
+    {
+      "name": "llama4j.models",
+      "type": "java.util.List<com.llama4j.spring.LlamaProperties$ModelConfig>",
       "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig",
-      "sourceMethod": "getModel()",
-      "description": "模型加载配置"
+      "description": "多模型配置列表"
     },
     {
       "name": "llama4j.inference",
@@ -19,46 +25,88 @@
       "sourceType": "com.llama4j.spring.LlamaProperties$InferenceConfig",
       "sourceMethod": "getInference()",
       "description": "推理默认参数"
-    },
-    {
-      "name": "llama4j.server",
-      "type": "com.llama4j.spring.LlamaProperties$ServerConfig",
-      "sourceType": "com.llama4j.spring.LlamaProperties$ServerConfig",
-      "sourceMethod": "getServer()",
-      "description": "服务器配置"
     }
   ],
   "properties": [
     {
-      "name": "llama4j.model.path",
+      "name": "llama4j.api.key",
       "type": "java.lang.String",
-      "description": "本地 GGUF 模型文件路径（优先级高于 id）",
+      "description": "API Key，用于保护 /v1/** 和 /api/** 端点",
+      "sourceType": "com.llama4j.spring.LlamaProperties$ApiConfig"
+    },
+    {
+      "name": "llama4j.default-model",
+      "type": "java.lang.String",
+      "description": "默认使用的模型名称",
+      "sourceType": "com.llama4j.spring.LlamaProperties"
+    },
+    {
+      "name": "llama4j.models[].name",
+      "type": "java.lang.String",
+      "description": "模型名称（唯一标识）",
       "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
     },
     {
-      "name": "llama4j.model.id",
+      "name": "llama4j.models[].type",
       "type": "java.lang.String",
-      "description": "HuggingFace 模型 ID（如 Qwen/Qwen2.5-7B-Instruct-GGUF），自动下载",
+      "description": "模型类型：local（本地 GGUF）或 openai（OpenAI 兼容 API）",
+      "defaultValue": "local",
       "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
     },
     {
-      "name": "llama4j.model.n-ctx",
+      "name": "llama4j.models[].path",
+      "type": "java.lang.String",
+      "description": "本地 GGUF 模型文件路径",
+      "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
+    },
+    {
+      "name": "llama4j.models[].mmproj-path",
+      "type": "java.lang.String",
+      "description": "多模态投影器（mmproj）路径，用于 VLM 模型",
+      "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
+    },
+    {
+      "name": "llama4j.models[].model-id",
+      "type": "java.lang.String",
+      "description": "HuggingFace 模型 ID，自动下载",
+      "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
+    },
+    {
+      "name": "llama4j.models[].n-ctx",
       "type": "java.lang.Integer",
-      "description": "上下文窗口大小（token 数量）",
+      "description": "上下文窗口大小",
       "defaultValue": 4096,
       "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
     },
     {
-      "name": "llama4j.model.n-gpu-layers",
+      "name": "llama4j.models[].n-gpu-layers",
       "type": "java.lang.Integer",
       "description": "卸载到 GPU 的层数，-1 表示全部卸载",
       "defaultValue": -1,
       "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
     },
     {
-      "name": "llama4j.model.n-threads",
+      "name": "llama4j.models[].n-threads",
       "type": "java.lang.Integer",
       "description": "CPU 推理线程数",
+      "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
+    },
+    {
+      "name": "llama4j.models[].api-key",
+      "type": "java.lang.String",
+      "description": "OpenAI 兼容 API 的密钥",
+      "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
+    },
+    {
+      "name": "llama4j.models[].base-url",
+      "type": "java.lang.String",
+      "description": "OpenAI 兼容 API 的基础 URL",
+      "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
+    },
+    {
+      "name": "llama4j.models[].model-name",
+      "type": "java.lang.String",
+      "description": "云端 API 使用的模型名称",
       "sourceType": "com.llama4j.spring.LlamaProperties$ModelConfig"
     },
     {
@@ -95,20 +143,6 @@
       "description": "重复惩罚系数（>1.0 抑制重复）",
       "defaultValue": 1.1,
       "sourceType": "com.llama4j.spring.LlamaProperties$InferenceConfig"
-    },
-    {
-      "name": "llama4j.server.openai-compatible",
-      "type": "java.lang.Boolean",
-      "description": "是否启用 OpenAI 兼容 API 端点",
-      "defaultValue": true,
-      "sourceType": "com.llama4j.spring.LlamaProperties$ServerConfig"
-    },
-    {
-      "name": "llama4j.server.max-concurrent-requests",
-      "type": "java.lang.Integer",
-      "description": "最大并发推理请求数",
-      "defaultValue": 4,
-      "sourceType": "com.llama4j.spring.LlamaProperties$ServerConfig"
     }
   ]
 }

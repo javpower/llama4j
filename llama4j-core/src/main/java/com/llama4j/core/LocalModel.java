@@ -21,7 +21,7 @@ import java.util.concurrent.Executors;
  *     .build());
  * }</pre>
  */
-public final class LocalModel implements Model {
+public final class LocalModel implements Model, AutoCloseable {
 
     private final ChatService chatService;
     private final String modelDescription;
@@ -47,6 +47,7 @@ public final class LocalModel implements Model {
     }
 
     /** 关闭模型，释放原生资源 */
+    @Override
     public void close() {
         chatService.shutdown();
     }
@@ -69,6 +70,28 @@ public final class LocalModel implements Model {
         LlamaContext context = new LlamaContext(modelPath, params);
         ChatTemplateEngine engine = new ChatTemplateEngine();
         ChatService chatService = new ChatService(context, engine);
+        String desc = context.getModelDescription();
+        return new LocalModel(chatService, desc);
+    }
+
+    /**
+     * 从 VLM 模型文件创建支持视觉的本地模型（使用默认参数）。
+     *
+     * @param modelPath   VLM 模型 GGUF 文件路径
+     * @param mmprojPath  mmproj 投影器文件路径（通常与模型路径相同）
+     */
+    public static LocalModel fromFileWithVision(String modelPath, String mmprojPath) {
+        return fromFileWithVision(modelPath, ModelParams.DEFAULT, mmprojPath);
+    }
+
+    /**
+     * 从 VLM 模型文件创建支持视觉的本地模型（自定义参数）。
+     */
+    public static LocalModel fromFileWithVision(String modelPath, ModelParams params, String mmprojPath) {
+        LlamaContext context = new LlamaContext(modelPath, params);
+        ChatTemplateEngine engine = new ChatTemplateEngine();
+        ChatService chatService = new ChatService(context, engine);
+        chatService.enableMultimodal(mmprojPath);
         String desc = context.getModelDescription();
         return new LocalModel(chatService, desc);
     }

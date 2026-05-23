@@ -17,5 +17,5 @@ package com.llama4j.chat.content;
  * }</pre>
  */
 public sealed interface ContentBlock
-    permits TextBlock, ToolUseBlock, ToolResultBlock, ThinkingBlock {
+    permits TextBlock, ToolUseBlock, ToolResultBlock, ThinkingBlock, ImageBlock {
 }

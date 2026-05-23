@@ -25,6 +25,8 @@
 #include "llama4j.h"
 #include "llama.h"
 #include "ggml.h"
+#include "mtmd.h"
+#include "mtmd-helper.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -47,8 +49,10 @@ struct LlamaSession {
     std::mutex    mutex;
     int           lastPromptTokens = 0;
     int           lastCompletionTokens = 0;
+    mtmd_context *mtmdCtx = nullptr;
 
     ~LlamaSession() {
+        if (mtmdCtx) mtmd_free(mtmdCtx);
         if (ctx)  llama_free(ctx);
         if (model) llama_model_free(model);
     }
@@ -105,7 +109,11 @@ static void decodePromptInBatches(llama_context *ctx,
     for (int i = 0; i < nTokens; i += nBatch) {
         int batchSize = std::min(nBatch, nTokens - i);
         llama_batch batch = llama_batch_get_one(tokens + i, batchSize);
-        llama_decode(ctx, batch);
+        int32_t res = llama_decode(ctx, batch);
+        if (res < 0) {
+            fprintf(stderr, "llama4j: llama_decode fatal error (%d) at prompt batch offset %d\n", res, i);
+            return;
+        }
     }
 }
 
@@ -118,7 +126,11 @@ static void encodeInBatches(llama_context *ctx,
     for (int i = 0; i < nTokens; i += nBatch) {
         int batchSize = std::min(nBatch, nTokens - i);
         llama_batch batch = llama_batch_get_one(tokens + i, batchSize);
-        llama_encode(ctx, batch);
+        int32_t res = llama_encode(ctx, batch);
+        if (res < 0) {
+            fprintf(stderr, "llama4j: llama_encode fatal error (%d) at batch offset %d\n", res, i);
+            return;
+        }
     }
 }
 
@@ -220,16 +232,24 @@ Java_com_llama4j_native_1_LlamaContext_tokenize(
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_llama4j_native_1_LlamaContext_tokenToStr(
+Java_com_llama4j_native_1_LlamaContext_detokenize(
     JNIEnv *env, jclass clazz,
-    jlong nativeHandle, jint tokenId)
+    jlong nativeHandle, jintArray tokens)
 {
     if (nativeHandle == 0) return env->NewStringUTF("");
     auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
 
     const llama_vocab *vocab = llama_model_get_vocab(session->model);
-    std::string piece = tokenToPiece(vocab, tokenId);
-    return env->NewStringUTF(piece.c_str());
+    jsize n = env->GetArrayLength(tokens);
+    jint *elems = env->GetIntArrayElements(tokens, nullptr);
+
+    std::string result;
+    for (jsize i = 0; i < n; i++) {
+        result += tokenToPiece(vocab, elems[i]);
+    }
+
+    env->ReleaseIntArrayElements(tokens, elems, JNI_ABORT);
+    return env->NewStringUTF(result.c_str());
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -299,7 +319,7 @@ Java_com_llama4j_native_1_LlamaContext_generate(
         }
 
         batch = llama_batch_get_one(&newToken, 1);
-        llama_decode(session->ctx, batch);
+        if (llama_decode(session->ctx, batch) != 0) break;
         session->lastTokens.push_back(newToken);
     }
 
@@ -377,7 +397,7 @@ Java_com_llama4j_native_1_LlamaContext_generateStream(
         env->DeleteLocalRef(jPiece);
 
         batch = llama_batch_get_one(&newToken, 1);
-        llama_decode(session->ctx, batch);
+        if (llama_decode(session->ctx, batch) != 0) break;
         session->lastTokens.push_back(newToken);
     }
 
@@ -619,7 +639,7 @@ Java_com_llama4j_native_1_LlamaContext_generateWithGrammar(
         }
 
         batch = llama_batch_get_one(&newToken, 1);
-        llama_decode(session->ctx, batch);
+        if (llama_decode(session->ctx, batch) != 0) break;
         session->lastTokens.push_back(newToken);
     }
 
@@ -705,7 +725,7 @@ Java_com_llama4j_native_1_LlamaContext_generateStreamWithGrammar(
         env->DeleteLocalRef(jPiece);
 
         batch = llama_batch_get_one(&newToken, 1);
-        llama_decode(session->ctx, batch);
+        if (llama_decode(session->ctx, batch) != 0) break;
         session->lastTokens.push_back(newToken);
     }
 
@@ -764,6 +784,366 @@ Java_com_llama4j_native_1_LlamaContext_embed(
     jfloatArray result = env->NewFloatArray(nEmbd);
     env->SetFloatArrayRegion(result, 0, nEmbd, embeddings);
     return result;
+}
+
+/* ──────────────────────────────────────────────────────────────
+ *  多模态（Vision-Language Model）支持
+ *  ────────────────────────────────────────────────────────────── */
+
+JNIEXPORT void JNICALL
+Java_com_llama4j_native_1_LlamaContext_initMultimodal(
+    JNIEnv *env, jclass clazz,
+    jlong nativeHandle, jstring mmprojPath)
+{
+    if (nativeHandle == 0) {
+        throwJavaException(env, "java/lang/IllegalArgumentException", "nativeHandle 为 0");
+        return;
+    }
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+
+    if (session->mtmdCtx) {
+        mtmd_free(session->mtmdCtx);
+        session->mtmdCtx = nullptr;
+    }
+
+    const char *pathStr = env->GetStringUTFChars(mmprojPath, nullptr);
+    if (!pathStr) {
+        throwJavaException(env, "java/lang/IllegalArgumentException", "mmproj 路径不能为空");
+        return;
+    }
+    std::string path(pathStr);
+    env->ReleaseStringUTFChars(mmprojPath, pathStr);
+
+    auto mparams = mtmd_context_params_default();
+    mparams.use_gpu = true;
+    mparams.n_threads = 4;
+
+    mtmd_context *mctx = mtmd_init_from_file(path.c_str(), session->model, mparams);
+    if (!mctx) {
+        throwJavaException(env, "java/io/IOException",
+            ("无法初始化多模态上下文: " + path).c_str());
+        return;
+    }
+    session->mtmdCtx = mctx;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_llama4j_native_1_LlamaContext_isMultimodalEnabled(
+    JNIEnv *env, jclass clazz, jlong nativeHandle)
+{
+    if (nativeHandle == 0) return JNI_FALSE;
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+    return session->mtmdCtx != nullptr ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_llama4j_native_1_LlamaContext_freeMultimodal(
+    JNIEnv *env, jclass clazz, jlong nativeHandle)
+{
+    if (nativeHandle == 0) return;
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+    if (session->mtmdCtx) {
+        mtmd_free(session->mtmdCtx);
+        session->mtmdCtx = nullptr;
+    }
+}
+
+/**
+ * 多模态同步生成。
+ *
+ * 流程：
+ *   1. 从 byte[] 创建 mtmd_bitmap
+ *   2. 使用 mtmd_tokenize 将 prompt（含 <__media__> 标记）与图片交错编码
+ *   3. mtmd_helper_eval_chunks 将所有 chunks（文本 + 图片）送入 KV cache
+ *   4. 标准 autoregressive sampling loop 生成文本
+ */
+JNIEXPORT jstring JNICALL
+Java_com_llama4j_native_1_LlamaContext_generateMultimodal(
+    JNIEnv *env, jclass clazz,
+    jlong nativeHandle, jstring prompt,
+    jobjectArray imageDataArray,
+    jint maxTokens, jfloat temperature,
+    jint topK, jfloat topP,
+    jfloat repeatPenalty, jlong seed,
+    jstring stopToken)
+{
+    if (nativeHandle == 0) return env->NewStringUTF("");
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+
+    std::lock_guard<std::mutex> lock(session->mutex);
+
+    if (!session->mtmdCtx) {
+        throwJavaException(env, "java/lang/IllegalStateException", "多模态未初始化，请先调用 initMultimodal");
+        return env->NewStringUTF("");
+    }
+
+    const char *promptStr = env->GetStringUTFChars(prompt, nullptr);
+    std::string promptText(promptStr);
+    env->ReleaseStringUTFChars(prompt, promptStr);
+
+    std::string stopTokenStr;
+    if (stopToken != nullptr) {
+        const char *stopStr = env->GetStringUTFChars(stopToken, nullptr);
+        stopTokenStr = stopStr;
+        env->ReleaseStringUTFChars(stopToken, stopStr);
+    }
+
+    // 加载所有图片为 mtmd_bitmap
+    jsize nImages = imageDataArray ? env->GetArrayLength(imageDataArray) : 0;
+    std::vector<mtmd_bitmap *> bitmaps(nImages, nullptr);
+    for (jsize i = 0; i < nImages; i++) {
+        jbyteArray imgBytes = (jbyteArray) env->GetObjectArrayElement(imageDataArray, i);
+        jsize dataLen = env->GetArrayLength(imgBytes);
+        jbyte *data = env->GetByteArrayElements(imgBytes, nullptr);
+        bitmaps[i] = mtmd_helper_bitmap_init_from_buf(session->mtmdCtx,
+            reinterpret_cast<const unsigned char *>(data), dataLen);
+        env->ReleaseByteArrayElements(imgBytes, data, JNI_ABORT);
+        env->DeleteLocalRef(imgBytes);
+        if (!bitmaps[i]) {
+            for (auto *b : bitmaps) { if (b) mtmd_bitmap_free(b); }
+            throwJavaException(env, "java/io/IOException",
+                ("图片解码失败，第 " + std::to_string(i + 1) + " 张图片数据无效").c_str());
+            return env->NewStringUTF("");
+        }
+    }
+
+    // tokenize: 将 prompt 中的 <__media__> 标记与图片交错
+    std::vector<const mtmd_bitmap *> bitmapPtrs(nImages);
+    for (jsize i = 0; i < nImages; i++) bitmapPtrs[i] = bitmaps[i];
+
+    mtmd_input_text inputText;
+    inputText.text = promptText.c_str();
+    inputText.add_special = true;
+    inputText.parse_special = true;
+
+    mtmd_input_chunks *chunks = mtmd_input_chunks_init();
+    int32_t tokenizeRes = mtmd_tokenize(session->mtmdCtx, chunks, &inputText,
+        bitmapPtrs.data(), nImages);
+
+    if (tokenizeRes != 0) {
+        mtmd_input_chunks_free(chunks);
+        for (auto *b : bitmaps) { if (b) mtmd_bitmap_free(b); }
+        throwJavaException(env, "java/io/IOException",
+            ("多模态 tokenize 失败，错误码: " + std::to_string(tokenizeRes)).c_str());
+        return env->NewStringUTF("");
+    }
+
+    // 清空 KV cache 并评估所有 chunks
+    llama_memory_seq_rm(llama_get_memory(session->ctx), -1, -1, -1);
+
+    llama_pos nPast = 0;
+    int32_t evalRes = mtmd_helper_eval_chunks(session->mtmdCtx, session->ctx,
+        chunks, nPast, 0, session->nBatch, true, &nPast);
+
+    // 释放 chunks 和 bitmaps
+    mtmd_input_chunks_free(chunks);
+    for (auto *b : bitmaps) { if (b) mtmd_bitmap_free(b); }
+
+    if (evalRes != 0) {
+        throwJavaException(env, "java/io/IOException",
+            ("多模态 eval_chunks 失败，错误码: " + std::to_string(evalRes)).c_str());
+        return env->NewStringUTF("");
+    }
+
+    // autoregressive sampling loop（与 generate 相同）
+    const llama_vocab *vocab = llama_model_get_vocab(session->model);
+    llama_batch batch;
+
+    auto *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(smpl, llama_sampler_init_penalties(
+        64, repeatPenalty, 0.0f, 0.0f));
+    if (temperature > 0.0f) {
+        llama_sampler_chain_add(smpl, llama_sampler_init_temp(temperature));
+        llama_sampler_chain_add(smpl, llama_sampler_init_top_k(topK));
+        llama_sampler_chain_add(smpl, llama_sampler_init_top_p(topP, 1));
+        llama_sampler_chain_add(smpl, llama_sampler_init_dist(seed >= 0 ? seed : (uint32_t)time(nullptr)));
+    } else {
+        llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
+    }
+
+    std::string result;
+    int promptTokenCount = static_cast<int>(nPast);
+    session->lastTokens.clear();
+
+    for (int i = 0; i < maxTokens; i++) {
+        llama_token newToken = llama_sampler_sample(smpl, session->ctx, -1);
+
+        if (llama_vocab_is_eog(vocab, newToken)) break;
+
+        std::string piece = tokenToPiece(vocab, newToken);
+        result += piece;
+
+        if (!stopTokenStr.empty() && result.find(stopTokenStr) != std::string::npos) {
+            size_t pos = result.find(stopTokenStr);
+            result = result.substr(0, pos);
+            break;
+        }
+
+        // 手动构建 batch，设置正确的 position（从 nPast 继续递增）
+        llama_pos curPos = nPast + static_cast<llama_pos>(i);
+        batch.n_tokens = 1;
+        batch.token = &newToken;
+        batch.embd = nullptr;
+        batch.pos = &curPos;
+        batch.n_seq_id = nullptr;
+        batch.seq_id = nullptr;
+        batch.logits = nullptr;
+        if (llama_decode(session->ctx, batch) != 0) break;
+        session->lastTokens.push_back(newToken);
+    }
+
+    session->lastPromptTokens = promptTokenCount;
+    session->lastCompletionTokens = static_cast<int>(session->lastTokens.size());
+
+    llama_sampler_free(smpl);
+    return env->NewStringUTF(result.c_str());
+}
+
+/**
+ * 多模态流式生成。
+ */
+JNIEXPORT void JNICALL
+Java_com_llama4j_native_1_LlamaContext_generateMultimodalStream(
+    JNIEnv *env, jclass clazz,
+    jlong nativeHandle, jstring prompt,
+    jobjectArray imageDataArray,
+    jint maxTokens, jfloat temperature,
+    jint topK, jfloat topP,
+    jfloat repeatPenalty, jlong seed,
+    jstring stopToken, jobject callback)
+{
+    if (nativeHandle == 0 || !callback) return;
+    auto *session = reinterpret_cast<LlamaSession *>(nativeHandle);
+
+    std::lock_guard<std::mutex> lock(session->mutex);
+
+    if (!session->mtmdCtx) {
+        throwJavaException(env, "java/lang/IllegalStateException", "多模态未初始化，请先调用 initMultimodal");
+        return;
+    }
+
+    jclass callbackClass = env->GetObjectClass(callback);
+    jmethodID onTokenMethod = env->GetMethodID(callbackClass, "onToken", "(Ljava/lang/String;)V");
+
+    const char *promptStr = env->GetStringUTFChars(prompt, nullptr);
+    std::string promptText(promptStr);
+    env->ReleaseStringUTFChars(prompt, promptStr);
+
+    std::string stopTokenStr;
+    if (stopToken != nullptr) {
+        const char *stopStr = env->GetStringUTFChars(stopToken, nullptr);
+        stopTokenStr = stopStr;
+        env->ReleaseStringUTFChars(stopToken, stopStr);
+    }
+
+    // 加载所有图片为 mtmd_bitmap
+    jsize nImages = imageDataArray ? env->GetArrayLength(imageDataArray) : 0;
+    std::vector<mtmd_bitmap *> bitmaps(nImages, nullptr);
+    for (jsize i = 0; i < nImages; i++) {
+        jbyteArray imgBytes = (jbyteArray) env->GetObjectArrayElement(imageDataArray, i);
+        jsize dataLen = env->GetArrayLength(imgBytes);
+        jbyte *data = env->GetByteArrayElements(imgBytes, nullptr);
+        bitmaps[i] = mtmd_helper_bitmap_init_from_buf(session->mtmdCtx,
+            reinterpret_cast<const unsigned char *>(data), dataLen);
+        env->ReleaseByteArrayElements(imgBytes, data, JNI_ABORT);
+        env->DeleteLocalRef(imgBytes);
+        if (!bitmaps[i]) {
+            for (auto *b : bitmaps) { if (b) mtmd_bitmap_free(b); }
+            throwJavaException(env, "java/io/IOException",
+                ("图片解码失败，第 " + std::to_string(i + 1) + " 张图片数据无效").c_str());
+            return;
+        }
+    }
+
+    // tokenize
+    std::vector<const mtmd_bitmap *> bitmapPtrs(nImages);
+    for (jsize i = 0; i < nImages; i++) bitmapPtrs[i] = bitmaps[i];
+
+    mtmd_input_text inputText;
+    inputText.text = promptText.c_str();
+    inputText.add_special = true;
+    inputText.parse_special = true;
+
+    mtmd_input_chunks *chunks = mtmd_input_chunks_init();
+    int32_t tokenizeRes = mtmd_tokenize(session->mtmdCtx, chunks, &inputText,
+        bitmapPtrs.data(), nImages);
+
+    if (tokenizeRes != 0) {
+        mtmd_input_chunks_free(chunks);
+        for (auto *b : bitmaps) { if (b) mtmd_bitmap_free(b); }
+        throwJavaException(env, "java/io/IOException",
+            ("多模态 tokenize 失败，错误码: " + std::to_string(tokenizeRes)).c_str());
+        return;
+    }
+
+    // 清空 KV cache 并评估所有 chunks
+    llama_memory_seq_rm(llama_get_memory(session->ctx), -1, -1, -1);
+
+    llama_pos nPast = 0;
+    int32_t evalRes = mtmd_helper_eval_chunks(session->mtmdCtx, session->ctx,
+        chunks, nPast, 0, session->nBatch, true, &nPast);
+
+    mtmd_input_chunks_free(chunks);
+    for (auto *b : bitmaps) { if (b) mtmd_bitmap_free(b); }
+
+    if (evalRes != 0) {
+        throwJavaException(env, "java/io/IOException",
+            ("多模态 eval_chunks 失败，错误码: " + std::to_string(evalRes)).c_str());
+        return;
+    }
+
+    // autoregressive sampling loop（流式版本）
+    const llama_vocab *vocab = llama_model_get_vocab(session->model);
+    llama_batch batch;
+
+    auto *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(smpl, llama_sampler_init_penalties(
+        64, repeatPenalty, 0.0f, 0.0f));
+    if (temperature > 0.0f) {
+        llama_sampler_chain_add(smpl, llama_sampler_init_temp(temperature));
+        llama_sampler_chain_add(smpl, llama_sampler_init_top_k(topK));
+        llama_sampler_chain_add(smpl, llama_sampler_init_top_p(topP, 1));
+        llama_sampler_chain_add(smpl, llama_sampler_init_dist(seed >= 0 ? seed : (uint32_t)time(nullptr)));
+    } else {
+        llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
+    }
+
+    std::string result;
+    int promptTokenCount = static_cast<int>(nPast);
+    session->lastTokens.clear();
+
+    for (int i = 0; i < maxTokens; i++) {
+        llama_token newToken = llama_sampler_sample(smpl, session->ctx, -1);
+        if (llama_vocab_is_eog(vocab, newToken)) break;
+
+        std::string piece = tokenToPiece(vocab, newToken);
+        result += piece;
+
+        if (!stopTokenStr.empty() && result.find(stopTokenStr) != std::string::npos) {
+            break;
+        }
+
+        jstring jPiece = env->NewStringUTF(piece.c_str());
+        env->CallVoidMethod(callback, onTokenMethod, jPiece);
+        env->DeleteLocalRef(jPiece);
+
+        // 手动构建 batch，设置正确的 position（从 nPast 继续递增）
+        llama_pos curPos = nPast + static_cast<llama_pos>(i);
+        batch.n_tokens = 1;
+        batch.token = &newToken;
+        batch.embd = nullptr;
+        batch.pos = &curPos;
+        batch.n_seq_id = nullptr;
+        batch.seq_id = nullptr;
+        batch.logits = nullptr;
+        if (llama_decode(session->ctx, batch) != 0) break;
+        session->lastTokens.push_back(newToken);
+    }
+
+    session->lastPromptTokens = promptTokenCount;
+    session->lastCompletionTokens = static_cast<int>(session->lastTokens.size());
+
+    llama_sampler_free(smpl);
 }
 
 /* ──────────────────────────────────────────────────────────────

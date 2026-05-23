@@ -2,9 +2,12 @@ package com.llama4j.core;
 
 import com.llama4j.chat.ChatTemplateEngine;
 import com.llama4j.chat.Message;
+import com.llama4j.chat.Role;
 import com.llama4j.exception.InferenceException;
 import com.llama4j.native_.GenerateParams;
+import com.llama4j.native_.ImageData;
 import com.llama4j.native_.LlamaContext;
+import com.llama4j.native_.MultimodalContext;
 import com.llama4j.native_.TokenCallback;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,6 +79,9 @@ public final class ChatService {
     /** 流式推理的异步执行器 */
     private final ExecutorService streamExecutor;
 
+    /** 多模态推理上下文（null 表示纯文本模式） */
+    private volatile MultimodalContext multimodalContext;
+
     /**
      * 创建 ChatService 实例。
      *
@@ -90,6 +96,15 @@ public final class ChatService {
             Runtime.getRuntime().availableProcessors(),
             new DaemonThreadFactory("llama4j-stream"));
         LOG.info("ChatService 初始化完成");
+    }
+
+    /**
+     * 启用多模态支持。
+     *
+     * @param mmprojPath mmproj 文件路径（通常与模型路径相同）
+     */
+    public void enableMultimodal(String mmprojPath) {
+        this.multimodalContext = context.enableMultimodal(mmprojPath);
     }
 
     /* ──────────────────────────────────────────
@@ -115,11 +130,22 @@ public final class ChatService {
         Objects.requireNonNull(request, "请求不能为 null");
         long startTime = System.currentTimeMillis();
 
-        // 步骤 1：渲染对话模板
+        // 多模态路径：检查是否有图片且多模态已启用
+        boolean hasImages = !request.images().isEmpty()
+            || request.messages().stream().anyMatch(Message::hasImages);
+
+        if (hasImages && multimodalContext != null) {
+            return chatMultimodal(request, startTime);
+        }
+
+        return chatTextOnly(request, startTime);
+    }
+
+    /** 纯文本推理（不走多模态路径，避免递归） */
+    private ChatResponse chatTextOnly(ChatRequest request, long startTime) {
         String prompt = renderPrompt(request.messages());
         LOG.debug("渲染后的提示词长度: {} 字符", prompt.length());
 
-        // 步骤 2：构造生成参数
         List<String> stopTokens = resolveStopTokens(request);
         GenerateParams params = GenerateParams.builder(prompt)
             .maxTokens(request.maxTokens())
@@ -133,26 +159,108 @@ public final class ChatService {
             .jsonMode(request.jsonMode())
             .build();
 
-        // 步骤 3：执行推理
         String result = context.generate(params);
+        return buildResponse(result, startTime);
+    }
+
+    /* ──────────────────────────────────────────
+     *  多模态推理
+     *  ────────────────────────────────────────── */
+
+    private ChatResponse chatMultimodal(ChatRequest request, long startTime) {
+        // 收集所有图片数据
+        List<byte[]> imageBytes = new ArrayList<>();
+        for (ImageData img : request.images()) {
+            imageBytes.add(img.data());
+        }
+        for (Message msg : request.messages()) {
+            for (var imgBlock : msg.imageBlocks()) {
+                if (imgBlock.data() != null) {
+                    imageBytes.add(imgBlock.data());
+                }
+            }
+        }
+
+        if (imageBytes.isEmpty()) {
+            LOG.warn("多模态请求但没有图片数据，回退到文本模式");
+            return chatTextOnly(request, startTime);
+        }
+
+        // 渲染 prompt，为包含图片的消息插入 <__media__> 标记
+        int requestImageCount = (int) request.images().stream()
+            .filter(img -> img.data() != null)
+            .count();
+        String prompt = renderMultimodalPrompt(request.messages(), requestImageCount);
+        LOG.debug("多模态 prompt 长度: {}, 图片数: {}", prompt.length(), imageBytes.size());
+
+        List<String> stopTokens = resolveStopTokens(request);
+        GenerateParams params = GenerateParams.builder(prompt)
+            .maxTokens(request.maxTokens())
+            .temperature(request.temperature())
+            .topK(request.topK())
+            .topP(request.topP())
+            .repeatPenalty(request.repeatPenalty())
+            .seed(request.seed())
+            .stopTokens(stopTokens)
+            .build();
+
+        byte[][] imageArray = imageBytes.toArray(new byte[0][]);
+        String result = multimodalContext.generate(params, imageArray);
+        LOG.info("多模态推理完成");
+        return buildResponse(result, startTime);
+    }
+
+    /** 构建推理响应（共用逻辑：strip、统计、记录） */
+    private ChatResponse buildResponse(String result, long startTime) {
         long latencyMs = System.currentTimeMillis() - startTime;
-
-        // 步骤 4：后处理 — 清理小模型可能生成的多轮对话幻觉
         result = stripHallucinatedTurns(result);
-
-        // 步骤 5：获取 token 统计（直接从原生层获取，避免重复分词）
         int[] genStats = context.getGenerateStats();
         int promptTokens = genStats[0];
         int completionTokens = genStats[1];
         double tps = latencyMs > 0 ? (double) completionTokens / (latencyMs / 1000.0) : 0.0;
 
         ChatResponse response = ChatResponse.of(result, promptTokens, completionTokens, tps, latencyMs);
-
-        // 记录统计
         stats.recordInference(promptTokens, completionTokens, tps, latencyMs);
         LOG.info("推理完成: {} 补全token, {}ms, {} tok/s", completionTokens, latencyMs, String.format("%.1f", tps));
-
         return response;
+    }
+
+    /**
+     * 渲染多模态 prompt：在包含图片的 user 消息前插入 &lt;__media__&gt; 标记。
+     *
+     * @param messages 消息列表
+     * @param totalImageCount 来自 request.images() 的图片总数，用于在最后一个 user 消息前插入标记
+     */
+    private String renderMultimodalPrompt(List<Message> messages, int totalImageCount) {
+        // 找到最后一个 user 消息的索引
+        int lastUserIdx = -1;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (messages.get(i).role() == Role.USER) {
+                lastUserIdx = i;
+                break;
+            }
+        }
+
+        List<Message> modifiedMessages = new ArrayList<>();
+        for (int i = 0; i < messages.size(); i++) {
+            Message msg = messages.get(i);
+            int markerCount = 0;
+            if (msg.hasImages()) {
+                markerCount += msg.imageBlocks().size();
+            }
+            // 来自 request.images() 的图片统一标记在最后一个 user 消息前
+            if (i == lastUserIdx && totalImageCount > 0) {
+                markerCount += totalImageCount;
+            }
+            if (markerCount > 0) {
+                String mediaMarkers = "<__media__>\n".repeat(markerCount);
+                String newContent = mediaMarkers + msg.content();
+                modifiedMessages.add(new Message(msg.role(), newContent));
+            } else {
+                modifiedMessages.add(msg);
+            }
+        }
+        return renderPrompt(modifiedMessages);
     }
 
     /* ──────────────────────────────────────────
@@ -175,12 +283,18 @@ public final class ChatService {
         Objects.requireNonNull(request, "请求不能为 null");
         Objects.requireNonNull(listener, "监听器不能为 null");
 
+        boolean hasImages = !request.images().isEmpty()
+            || request.messages().stream().anyMatch(Message::hasImages);
+
+        if (hasImages && multimodalContext != null) {
+            return chatStreamMultimodal(request, listener);
+        }
+
         return CompletableFuture.supplyAsync(() -> {
             try {
                 long startTime = System.currentTimeMillis();
                 String prompt = renderPrompt(request.messages());
 
-                // 用于收集所有生成的 token
                 StringBuilder resultBuilder = new StringBuilder();
 
                 List<String> stopTokens = resolveStopTokens(request);
@@ -196,30 +310,102 @@ public final class ChatService {
                     .jsonMode(request.jsonMode())
                     .build();
 
-                // 执行流式推理，逐 token 回调
                 context.generateStream(params, token -> {
                     resultBuilder.append(token);
                     listener.onToken(token);
                 });
 
-                // 构建最终响应
-                long latencyMs = System.currentTimeMillis() - startTime;
                 String result = stripHallucinatedTurns(resultBuilder.toString());
-                int[] genStats = context.getGenerateStats();
-                int promptTokens = genStats[0];
-                int completionTokens = genStats[1];
-                double tps = latencyMs > 0 ? (double) completionTokens / (latencyMs / 1000.0) : 0.0;
-
-                ChatResponse response = ChatResponse.of(result, promptTokens, completionTokens, tps, latencyMs);
-                stats.recordInference(promptTokens, completionTokens, tps, latencyMs);
+                ChatResponse response = buildResponse(result, startTime);
                 listener.onComplete(response);
-
                 return response;
             } catch (Exception e) {
                 listener.onError(e);
                 throw new InferenceException("流式推理失败", e);
             }
         }, streamExecutor);
+    }
+
+    /** 多模态流式推理 */
+    private CompletableFuture<ChatResponse> chatStreamMultimodal(ChatRequest request, ChatStreamListener listener) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                long startTime = System.currentTimeMillis();
+
+                List<byte[]> imageBytes = new ArrayList<>();
+                for (ImageData img : request.images()) {
+                    imageBytes.add(img.data());
+                }
+                for (Message msg : request.messages()) {
+                    for (var imgBlock : msg.imageBlocks()) {
+                        if (imgBlock.data() != null) {
+                            imageBytes.add(imgBlock.data());
+                        }
+                    }
+                }
+
+                if (imageBytes.isEmpty()) {
+                    // 无图片数据，回退到文本流式
+                    return chatStreamTextOnly(request, listener, startTime);
+                }
+
+                int requestImageCount = (int) request.images().stream()
+                    .filter(img -> img.data() != null)
+                    .count();
+                String prompt = renderMultimodalPrompt(request.messages(), requestImageCount);
+
+                List<String> stopTokens = resolveStopTokens(request);
+                GenerateParams params = GenerateParams.builder(prompt)
+                    .maxTokens(request.maxTokens())
+                    .temperature(request.temperature())
+                    .topK(request.topK())
+                    .topP(request.topP())
+                    .repeatPenalty(request.repeatPenalty())
+                    .seed(request.seed())
+                    .stopTokens(stopTokens)
+                    .build();
+
+                StringBuilder resultBuilder = new StringBuilder();
+                byte[][] imageArray = imageBytes.toArray(new byte[0][]);
+                multimodalContext.generateStream(params, imageArray, token -> {
+                    resultBuilder.append(token);
+                    listener.onToken(token);
+                });
+
+                String result = stripHallucinatedTurns(resultBuilder.toString());
+                ChatResponse response = buildResponse(result, startTime);
+                listener.onComplete(response);
+                return response;
+            } catch (Exception e) {
+                listener.onError(e);
+                throw new InferenceException("多模态流式推理失败", e);
+            }
+        }, streamExecutor);
+    }
+
+    /** 纯文本流式推理（不走多模态，避免递归） */
+    private ChatResponse chatStreamTextOnly(ChatRequest request, ChatStreamListener listener, long startTime) {
+        String prompt = renderPrompt(request.messages());
+        StringBuilder resultBuilder = new StringBuilder();
+
+        List<String> stopTokens = resolveStopTokens(request);
+        GenerateParams params = GenerateParams.builder(prompt)
+            .maxTokens(request.maxTokens())
+            .temperature(request.temperature())
+            .topK(request.topK())
+            .topP(request.topP())
+            .repeatPenalty(request.repeatPenalty())
+            .seed(request.seed())
+            .stopTokens(stopTokens)
+            .build();
+
+        context.generateStream(params, token -> {
+            resultBuilder.append(token);
+            listener.onToken(token);
+        });
+
+        String result = stripHallucinatedTurns(resultBuilder.toString());
+        return buildResponse(result, startTime);
     }
 
     /* ──────────────────────────────────────────
@@ -305,6 +491,9 @@ public final class ChatService {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+        if (multimodalContext != null) {
+            multimodalContext.close();
         }
         context.close();
         LOG.info("ChatService 已关闭");

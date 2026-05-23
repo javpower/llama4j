@@ -11,14 +11,23 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 public class WebSocketConfig implements WebSocketConfigurer {
 
     private final TerminalWebSocketHandler terminalHandler;
+    private final WebProperties webProperties;
 
-    public WebSocketConfig(TerminalWebSocketHandler terminalHandler) {
+    public WebSocketConfig(TerminalWebSocketHandler terminalHandler, WebProperties webProperties) {
         this.terminalHandler = terminalHandler;
+        this.webProperties = webProperties;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(terminalHandler, "/ws/terminal")
-                .setAllowedOrigins("http://localhost:8080", "http://127.0.0.1:8080");
+        var handler = registry.addHandler(terminalHandler, "/ws/terminal");
+
+        String[] origins = webProperties.getCors().getAllowedOrigins();
+        if (origins.length > 0) {
+            handler.setAllowedOrigins(origins);
+        } else {
+            // Default: allow same-origin only for security
+            handler.setAllowedOrigins("http://localhost:8080", "http://127.0.0.1:8080");
+        }
     }
 }

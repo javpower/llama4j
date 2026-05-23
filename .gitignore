@@ -73,5 +73,12 @@ credentials.json
 # ── llama.cpp 本地克隆（编译脚本下载的）──
 /tmp/
 
+# ── 模型文件（严禁提交，通常数百 MB 到数 GB）──
+*.gguf
+*.safetensors
+*.bin
+*.ggml
+models/
+
 # ── Claude Code ──
 .claude/

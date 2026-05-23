@@ -32,6 +32,7 @@ message(STATUS "使用 llama.cpp 路径: ${LLAMA_CPP_ROOT}")
 # 头文件路径
 set(LLAMA_INCLUDE_DIR "${LLAMA_CPP_ROOT}/include")
 set(GGML_INCLUDE_DIR "${LLAMA_CPP_ROOT}/ggml/include")
+set(MTMD_INCLUDE_DIR "${LLAMA_CPP_ROOT}/tools/mtmd")
 
 # 库文件路径
 if(APPLE)
@@ -56,6 +57,7 @@ target_include_directories(llama4j PRIVATE
     ${JNI_INCLUDE_DIRS}
     ${LLAMA_INCLUDE_DIR}
     ${GGML_INCLUDE_DIR}
+    ${MTMD_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
@@ -67,7 +69,9 @@ if(APPLE)
         ${LLAMA_LIB_DIR}/libggml.dylib
         ${LLAMA_LIB_DIR}/libggml-base.dylib
         ${LLAMA_LIB_DIR}/libggml-cpu.dylib
+        ${LLAMA_LIB_DIR}/libggml-blas.dylib
         ${LLAMA_LIB_DIR}/libggml-metal.dylib
+        ${LLAMA_LIB_DIR}/libmtmd.dylib
         "-framework Metal"
         "-framework Foundation"
         "-framework MetalKit"
@@ -83,10 +87,15 @@ elseif(UNIX)
         ${LLAMA_LIB_DIR}/libggml.so
         ${LLAMA_LIB_DIR}/libggml-base.so
         ${LLAMA_LIB_DIR}/libggml-cpu.so
+        ${LLAMA_LIB_DIR}/libmtmd.so
     )
     # 可选 CUDA
     if(EXISTS "${LLAMA_LIB_DIR}/libggml-cuda.so")
         target_link_libraries(llama4j PRIVATE ${LLAMA_LIB_DIR}/libggml-cuda.so)
+    endif()
+    # 可选 Vulkan
+    if(EXISTS "${LLAMA_LIB_DIR}/libggml-vulkan.so")
+        target_link_libraries(llama4j PRIVATE ${LLAMA_LIB_DIR}/libggml-vulkan.so)
     endif()
     set_target_properties(llama4j PROPERTIES
         INSTALL_RPATH "$ORIGIN"
@@ -100,6 +109,7 @@ else()
         ${LLAMA_LIB_DIR}/ggml.lib
         ${LLAMA_LIB_DIR}/ggml-base.lib
         ${LLAMA_LIB_DIR}/ggml-cpu.lib
+        ${LLAMA_LIB_DIR}/mtmd.lib
     )
     if(EXISTS "${LLAMA_LIB_DIR}/ggml-cuda.lib")
         target_link_libraries(llama4j PRIVATE ${LLAMA_LIB_DIR}/ggml-cuda.lib)

@@ -3,6 +3,7 @@ package com.llama4j.core;
 import com.llama4j.chat.Message;
 import com.llama4j.chat.Role;
 import com.llama4j.native_.GrammarConstraint;
+import com.llama4j.native_.ImageData;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -49,7 +50,8 @@ public record ChatRequest(
     long seed,
     List<String> stopTokens,
     GrammarConstraint grammar,
-    boolean jsonMode
+    boolean jsonMode,
+    List<ImageData> images
 ) {
 
     /**
@@ -70,6 +72,9 @@ public record ChatRequest(
         messages = List.copyOf(messages);
         if (stopTokens == null) {
             stopTokens = List.of();
+        }
+        if (images == null) {
+            images = List.of();
         }
         if (grammar != null && grammar.isClosed()) {
             throw new IllegalArgumentException("GrammarConstraint 已关闭，不能使用");
@@ -103,6 +108,7 @@ public record ChatRequest(
         private List<String> stopTokens = List.of();
         private GrammarConstraint grammar = null;
         private boolean jsonMode = false;
+        private List<ImageData> images = List.of();
 
         private Builder() {}
 
@@ -146,13 +152,14 @@ public record ChatRequest(
         public Builder stopTokens(List<String> stopTokens) { this.stopTokens = stopTokens != null ? stopTokens : List.of(); return this; }
         public Builder grammar(GrammarConstraint grammar)  { this.grammar = grammar; return this; }
         public Builder jsonMode(boolean jsonMode)          { this.jsonMode = jsonMode; return this; }
+        public Builder images(List<ImageData> images)      { this.images = images != null ? images : List.of(); return this; }
 
         /** 构建不可变的 ChatRequest 实例 */
         public ChatRequest build() {
             return new ChatRequest(
                 Collections.unmodifiableList(new ArrayList<>(messages)),
                 temperature, maxTokens, topK, topP, repeatPenalty, seed, stopTokens,
-                grammar, jsonMode);
+                grammar, jsonMode, images != null ? List.copyOf(images) : List.of());
         }
     }
 }

@@ -108,14 +108,14 @@ class ChatRequestTest {
         @DisplayName("should throw on empty messages list")
         void shouldThrowOnEmptyMessages() {
             assertThrows(IllegalArgumentException.class,
-                    () -> new ChatRequest(List.of(), 0.7f, 2048, 40, 0.9f, 1.1f, -1L, List.of(), null, false));
+                    () -> new ChatRequest(List.of(), 0.7f, 2048, 40, 0.9f, 1.1f, -1L, List.of(), null, false, List.of()));
         }
 
         @Test
         @DisplayName("should throw on null messages list")
         void shouldThrowOnNullMessages() {
             assertThrows(NullPointerException.class,
-                    () -> new ChatRequest(null, 0.7f, 2048, 40, 0.9f, 1.1f, -1L, List.of(), null, false));
+                    () -> new ChatRequest(null, 0.7f, 2048, 40, 0.9f, 1.1f, -1L, List.of(), null, false, List.of()));
         }
 
         @Test

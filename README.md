@@ -131,7 +131,7 @@
 │  ┌────────────────────────────────────────────────────────────────────────┐  │
 │  │                        LlamaContext                                    │  │
 │  │   generate() / generateStream() / tokenize() / saveSession()          │  │
-│  │   embed() / GrammarConstraint / EmbeddingVector                       │  │
+│  │   embed() / GrammarConstraint / EmbeddingVector / MultimodalContext   │  │
 │  │   Thread-safe (std::mutex) | Zero-copy buffers | Use-after-free guard  │  │
 │  └────────────────────────────────────────────────────────────────────────┘  │
 │  ┌──────────────────────────┐  ┌─────────────────────────────────────────┐  │
@@ -209,6 +209,58 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 - Grammar 约束生成 + JSON Mode
 - Embedding 向量 + 相似度搜索
 - 流式输出（SSE）
+
+### 视觉大模型（VLM）— 图片理解
+
+llama4j 支持多模态推理，可以用 Qwen2-VL、LLaVA 等 VLM 模型进行图片理解：
+
+**Java API：**
+
+```java
+// 加载 VLM 模型（需要模型文件 + mmproj 投影器权重）
+LocalModel model = LocalModel.fromFileWithVision(
+    "/models/Qwen2-VL-2B-Instruct-Q4_K_M.gguf",
+    "/models/mmproj-Qwen2-VL-2B-Instruct-f16.gguf"
+);
+
+// 发送图片 + 文本
+ChatRequest request = ChatRequest.builder()
+    .addMessage(Role.USER, "描述这张图片")
+    .images(List.of(ImageData.fromFile(Paths.get("photo.jpg"))))
+    .build();
+ChatResponse response = model.chat(request);
+```
+
+**YAML 配置（Spring Boot）：**
+
+```yaml
+llama4j:
+  models:
+    qwen2vl:
+      type: local
+      path: /models/Qwen2-VL-2B-Instruct-Q4_K_M.gguf
+      mmproj-path: /models/mmproj-Qwen2-VL-2B-Instruct-f16.gguf
+      n-ctx: 4096
+      n-gpu-layers: -1
+```
+
+**OpenAI 兼容 API（REST）：**
+
+```bash
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen2vl",
+    "messages": [{"role": "user", "content": [
+      {"type": "text", "text": "描述这张图片"},
+      {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+    ]}]
+  }'
+```
+
+支持同步和流式（SSE）两种模式，前端可直接上传图片。
+
+> **关于 mmproj**：VLM 模型需要两个文件协同工作——GGUF 模型文件（语言理解）和 mmproj 投影器（视觉编码）。部分模型的 mmproj 内嵌在 GGUF 中，此时 `mmproj-path` 与 `model-path` 设为相同即可。
 
 ### 云端大模型 — 同时支持
 
@@ -300,6 +352,30 @@ POST /v1/chat/completions?stream=true
 GET  /v1/models                    # 模型列表
 ```
 
+### API 安全 — 生产就绪
+
+所有 `/v1/*` 和 `/api/*` 端点均支持 Bearer Token 认证。不配置 API Key 则自动进入开发模式（不过滤）：
+
+```yaml
+llama4j:
+  api:
+    key: ${LLAMA4J_API_KEY}   # 环境变量，生产环境必须设置
+```
+
+```bash
+# 未配置 key 时 → 不校验（开发模式）
+curl http://localhost:8080/v1/models
+
+# 配置 key 后 → 必须携带 Authorization 头
+curl -H "Authorization: Bearer $LLAMA4J_API_KEY" http://localhost:8080/v1/models
+
+# WebSocket 终端的 CORS 也可配置
+llama4j:
+  web:
+    cors:
+      allowed-origins: https://your-domain.com, http://localhost:8080
+```
+
 ### 生产级可观测性
 
 8 个 Micrometer 指标自动导出，接入 Prometheus / Grafana 零代码：
@@ -321,7 +397,7 @@ llama4j.inference.errors       -- 推理错误计数
 
 | 模块 | 职责 |
 |------|------|
-| **llama4j-native** | JNI 桥接 llama.cpp。`LlamaContext`、`GrammarConstraint`、`EmbeddingVector` — 原生资源管理 |
+| **llama4j-native** | JNI 桥接 llama.cpp。`LlamaContext`、`GrammarConstraint`、`EmbeddingVector`、`MultimodalContext` — 原生资源管理 |
 | **llama4j-core** | `ChatService`、`EmbeddingService`、`SessionManager`、`InferenceStats` — 编排层 |
 | **llama4j-chat** | 聊天模板引擎，10+ 格式 + Jinja2 解析器 |
 | **llama4j-tools** | `@Tool` 注解驱动的函数调用 + ReAct 推理循环 |
