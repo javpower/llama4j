@@ -40,10 +40,16 @@ if(APPLE)
 elseif(UNIX)
     set(LLAMA_LIB_DIR "${LLAMA_CPP_ROOT}/build/bin")
 else()
-    # Windows MSVC: DLLs in build/bin/Release, import .lib in build/lib/Release
-    set(LLAMA_LIB_DIR "${LLAMA_CPP_ROOT}/build/lib/Release")
-    if(NOT EXISTS "${LLAMA_LIB_DIR}")
-        set(LLAMA_LIB_DIR "${LLAMA_CPP_ROOT}/build/bin/Release")
+    # Windows MSVC: try lib/Release first, then bin/Release
+    # Use file(TO_CMAKE_PATH) to normalize Windows paths
+    file(TO_CMAKE_PATH "${LLAMA_CPP_ROOT}/build/lib/Release" _lib_path)
+    file(TO_CMAKE_PATH "${LLAMA_CPP_ROOT}/build/bin/Release" _bin_path)
+    if(EXISTS "${_lib_path}")
+        set(LLAMA_LIB_DIR "${_lib_path}")
+    elseif(EXISTS "${_bin_path}")
+        set(LLAMA_LIB_DIR "${_bin_path}")
+    else()
+        set(LLAMA_LIB_DIR "${_bin_path}")
     endif()
 endif()
 
