@@ -76,8 +76,47 @@ Write-Host "[3/4] Compiling JNI bridge..."
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
+# Find DLL directory (bin/Release or bin)
 $binDir = Join-Path $LlamaCppDir "build\bin\Release"
 if (-not (Test-Path $binDir)) { $binDir = Join-Path $LlamaCppDir "build\bin" }
+
+# Find .lib directory (lib/Release, bin/Release, lib, or bin)
+$libDir = ""
+$libCandidates = @(
+    (Join-Path $LlamaCppDir "build\lib\Release"),
+    (Join-Path $LlamaCppDir "build\bin\Release"),
+    (Join-Path $LlamaCppDir "build\lib"),
+    (Join-Path $LlamaCppDir "build\bin")
+)
+foreach ($candidate in $libCandidates) {
+    if ((Test-Path "$candidate\llama.lib") -or (Test-Path "$candidate\llama-common.lib")) {
+        $libDir = $candidate
+        Write-Host "Found .lib files in: $libDir"
+        break
+    }
+}
+if ($libDir -eq "") {
+    Write-Host "WARNING: Could not find .lib files in any candidate directory"
+    Write-Host "Searched: $($libCandidates -join ', ')"
+    # Fallback to binDir
+    $libDir = $binDir
+}
+
+# Verify critical libraries exist
+$criticalLibs = @("llama.lib", "llama-common.lib", "ggml.lib", "ggml-base.lib")
+$missingLibs = @()
+foreach ($lib in $criticalLibs) {
+    if (-not (Test-Path "$libDir\$lib")) {
+        $missingLibs += $lib
+    }
+}
+if ($missingLibs.Count -gt 0) {
+    Write-Host "ERROR: Missing critical libraries in $libDir :"
+    foreach ($lib in $missingLibs) { Write-Host "  - $lib" }
+    Write-Host "Available files:"
+    Get-ChildItem $libDir -Filter "*.lib" | ForEach-Object { Write-Host "  $($_.Name)" }
+    throw "Critical .lib files missing - llama.cpp build may have failed"
+}
 
 # Copy llama.cpp DLLs
 Copy-Item "$binDir\ggml*.dll" $OutputDir -ErrorAction SilentlyContinue
@@ -109,5 +148,7 @@ Copy-Item "$jniBuildDir\llama4j.dll" $OutputDir -ErrorAction SilentlyContinue
 
 # Step 4: Verify
 Write-Host "[4/4] Verifying output..."
+Write-Host "DLL directory: $binDir"
+Write-Host "LIB directory: $libDir"
 Get-ChildItem $OutputDir | Format-Table Name, Length
 Write-Host "Build complete!"

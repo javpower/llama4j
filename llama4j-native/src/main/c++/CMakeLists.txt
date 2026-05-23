@@ -40,18 +40,32 @@ if(APPLE)
 elseif(UNIX)
     set(LLAMA_LIB_DIR "${LLAMA_CPP_ROOT}/build/bin")
 else()
-    # Windows MSVC: try lib/Release first, then bin/Release
-    # Use file(TO_CMAKE_PATH) to normalize Windows paths
-    file(TO_CMAKE_PATH "${LLAMA_CPP_ROOT}/build/lib/Release" _lib_path)
-    file(TO_CMAKE_PATH "${LLAMA_CPP_ROOT}/build/bin/Release" _bin_path)
-    if(EXISTS "${_lib_path}")
-        set(LLAMA_LIB_DIR "${_lib_path}")
-    elseif(EXISTS "${_bin_path}")
-        set(LLAMA_LIB_DIR "${_bin_path}")
-    else()
-        set(LLAMA_LIB_DIR "${_bin_path}")
+    # Windows MSVC: .lib files in build/lib/Release, DLLs in build/bin/Release
+    # Check multiple possible locations
+    set(_lib_candidates
+        "${LLAMA_CPP_ROOT}/build/lib/Release"
+        "${LLAMA_CPP_ROOT}/build/bin/Release"
+        "${LLAMA_CPP_ROOT}/build/lib"
+        "${LLAMA_CPP_ROOT}/build/bin"
+    )
+    set(LLAMA_LIB_DIR "")
+    foreach(_dir IN LISTS _lib_candidates)
+        file(TO_CMAKE_PATH "${_dir}" _normalized)
+        if(EXISTS "${_normalized}/llama.lib" OR EXISTS "${_normalized}/llama-common.lib")
+            set(LLAMA_LIB_DIR "${_normalized}")
+            break()
+        endif()
+    endforeach()
+    if(LLAMA_LIB_DIR STREQUAL "")
+        message(FATAL_ERROR "Cannot find llama.cpp libraries. Searched in:\n"
+            "  ${LLAMA_CPP_ROOT}/build/lib/Release\n"
+            "  ${LLAMA_CPP_ROOT}/build/bin/Release\n"
+            "  ${LLAMA_CPP_ROOT}/build/lib\n"
+            "  ${LLAMA_CPP_ROOT}/build/bin")
     endif()
 endif()
+
+message(STATUS "Library directory: ${LLAMA_LIB_DIR}")
 
 # 源文件
 set(SOURCES llama4j.cpp)
