@@ -517,6 +517,18 @@ Java_com_llama4j_native_1_LlamaContext_applyChatTemplate(
     const char *tmpl = session->chatTemplate.empty() ? nullptr : session->chatTemplate.c_str();
 
     int len = llama_chat_apply_template(tmpl, messages.data(), nMsg, addAssistant, nullptr, 0);
+    if (len <= 0) {
+        // 模板渲染失败，释放资源并返回空字符串
+        for (jsize i = 0; i < nMsg; i++) {
+            auto roleStr = (jstring) env->GetObjectArrayElement(roles, i);
+            auto contentStr = (jstring) env->GetObjectArrayElement(contents, i);
+            env->ReleaseStringUTFChars(roleStr, messages[i].role);
+            env->ReleaseStringUTFChars(contentStr, messages[i].content);
+            env->DeleteLocalRef(roleStr);
+            env->DeleteLocalRef(contentStr);
+        }
+        return env->NewStringUTF("");
+    }
     std::vector<char> buf(len + 1);
     llama_chat_apply_template(tmpl, messages.data(), nMsg, addAssistant, buf.data(), buf.size());
 
@@ -896,7 +908,7 @@ Java_com_llama4j_native_1_LlamaContext_generateMultimodal(
         jsize dataLen = env->GetArrayLength(imgBytes);
         jbyte *data = env->GetByteArrayElements(imgBytes, nullptr);
         bitmaps[i] = mtmd_helper_bitmap_init_from_buf(session->mtmdCtx,
-            reinterpret_cast<const unsigned char *>(data), dataLen);
+            reinterpret_cast<const unsigned char *>(data), dataLen, false);
         env->ReleaseByteArrayElements(imgBytes, data, JNI_ABORT);
         env->DeleteLocalRef(imgBytes);
         if (!bitmaps[i]) {
@@ -1044,7 +1056,7 @@ Java_com_llama4j_native_1_LlamaContext_generateMultimodalStream(
         jsize dataLen = env->GetArrayLength(imgBytes);
         jbyte *data = env->GetByteArrayElements(imgBytes, nullptr);
         bitmaps[i] = mtmd_helper_bitmap_init_from_buf(session->mtmdCtx,
-            reinterpret_cast<const unsigned char *>(data), dataLen);
+            reinterpret_cast<const unsigned char *>(data), dataLen, false);
         env->ReleaseByteArrayElements(imgBytes, data, JNI_ABORT);
         env->DeleteLocalRef(imgBytes);
         if (!bitmaps[i]) {

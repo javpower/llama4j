@@ -6,7 +6,7 @@ server:
 
 llama4j:
   # 默认模型名称
-  default-model: qwen-local
+  default-model: gemma4-12b
 
   # API 安全校验（不配或留空则不校验）
   # api:
@@ -14,22 +14,31 @@ llama4j:
 
   # 多模型配置
   models:
-    # 本地模型
-    - name: qwen-local
+    # Gemma 4 12B 多模态模型
+    - name: gemma4-12b
       type: local
-      path: ${LLAMA4J_MODEL_PATH:/Volumes/macEx/models/qwen2.5-7b-instruct-q4_k_m.gguf}
+      path: /Volumes/macEx/models/gemma-4-12b-it-qat-q4_0.gguf
+      mmproj-path: /Volumes/macEx/models/mmproj-gemma-4-12b-it-qat-q4_0.gguf
       n-ctx: 4096
       n-gpu-layers: -1
       n-threads: 8
 
-    # VLM 视觉模型
-    - name: qwen2vl
-      type: local
-      path: /Volumes/macEx/models/Qwen2-VL-2B-Instruct-Q4_K_M.gguf
-      mmproj-path: /Volumes/macEx/models/mmproj-Qwen2-VL-2B-Instruct-f16.gguf
-      n-ctx: 4096
-      n-gpu-layers: -1
-      n-threads: 8
+    # 本地模型（暂注释，16GB 内存同时加载多个模型压力大）
+    #- name: qwen-local
+    #  type: local
+    #  path: ${LLAMA4J_MODEL_PATH:/Volumes/macEx/models/qwen2.5-7b-instruct-q4_k_m.gguf}
+    #  n-ctx: 4096
+    #  n-gpu-layers: -1
+    #  n-threads: 8
+
+    # VLM 视觉模型（暂注释）
+    #- name: qwen2vl
+    #  type: local
+    #  path: /Volumes/macEx/models/Qwen2-VL-2B-Instruct-Q4_K_M.gguf
+    #  mmproj-path: /Volumes/macEx/models/mmproj-Qwen2-VL-2B-Instruct-f16.gguf
+    #  n-ctx: 4096
+    #  n-gpu-layers: -1
+    #  n-threads: 8
 #    - name: deepseek
 #      type: openai
 #      api-key: ${LLAMA4J_API_KEY:CHANGE_ME_IN_PRODUCTION}

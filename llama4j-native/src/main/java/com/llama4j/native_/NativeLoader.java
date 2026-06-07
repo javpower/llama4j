@@ -125,8 +125,8 @@ final class NativeLoader {
     private static String[] getDependenciesForPlatform(Platform platform) {
         return switch (platform.os()) {
             case MACOS -> new String[]{
-                "ggml-base", "ggml", "ggml-cpu", "ggml-blas", "ggml-metal",
-                "llama-common", "llama", "mtmd"
+                "ggml-base", "ggml-cpu", "ggml-blas", "ggml-metal", "ggml",
+                "llama", "llama-common", "mtmd"
             };
             case LINUX -> new String[]{
                 "ggml-base", "ggml", "ggml-cpu",

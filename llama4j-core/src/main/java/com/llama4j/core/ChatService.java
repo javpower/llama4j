@@ -441,12 +441,16 @@ public final class ChatService {
         try {
             String[] roles = messages.stream().map(m -> m.role().value()).toArray(String[]::new);
             String[] contents = messages.stream().map(Message::content).toArray(String[]::new);
-            return context.applyChatTemplate(roles, contents, true);
+            String result = context.applyChatTemplate(roles, contents, true);
+            if (result != null && !result.isBlank()) {
+                return result;
+            }
+            LOG.warn("原生模板渲染返回空结果，回退到 Java 模板引擎");
         } catch (Exception e) {
             LOG.warn("原生模板渲染失败，回退到 Java 模板引擎: {}", e.getMessage());
-            String chatTemplate = context.getChatTemplate();
-            return templateEngine.renderConversation(chatTemplate, messages);
         }
+        String chatTemplate = context.getChatTemplate();
+        return templateEngine.renderConversation(chatTemplate, messages);
     }
 
     private List<String> resolveStopTokens(ChatRequest request) {

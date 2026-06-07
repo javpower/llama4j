@@ -59,6 +59,7 @@ public final class ChatTemplateEngine {
         this.formats = List.of(
             new Llama3Format(),    // Meta Llama 3 / 3.1
             new ChatMLFormat(),    // Qwen, Yi, DeepSeek V2
+            new Gemma4Format(),    // Google Gemma 4 (优先于 Gemma 2)
             new GemmaFormat(),     // Google Gemma 2
             new Phi3Format(),      // Microsoft Phi-3
             new MistralFormat(),   // Mistral, Mixtral
